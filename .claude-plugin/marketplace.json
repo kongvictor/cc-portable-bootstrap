@@ -1,0 +1,26 @@
+{
+  "name": "cc-portable-bootstrap",
+  "owner": {
+    "name": "Victor"
+  },
+  "metadata": {
+    "description": "Portable, cross-platform Claude Code agent environment: Codex MCP, working modes, claudex launcher and a model-aware statusline.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-hud",
+      "source": { "source": "github", "repo": "jarrodwatts/claude-hud" },
+      "description": "Real-time statusline HUD (context bar, tools, agents, todos, git). Bundled here so it auto-installs as this plugin's dependency.",
+      "category": "monitoring",
+      "tags": ["hud", "statusline"]
+    },
+    {
+      "name": "cc-portable-bootstrap",
+      "source": "./",
+      "description": "One-command setup of a portable Claude Code agent environment: stable Codex MCP, Codex implementation mode, the claudex GPT launcher, and a statusline showing the real GPT context window plus official Claude/ChatGPT quota.",
+      "category": "workflow",
+      "tags": ["bootstrap", "codex", "mcp", "statusline", "cliproxyapi", "portable"]
+    }
+  ]
+}

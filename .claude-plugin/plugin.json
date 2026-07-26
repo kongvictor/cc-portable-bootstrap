@@ -1,0 +1,25 @@
+{
+  "name": "cc-portable-bootstrap",
+  "description": "Portable Claude Code agent environment: stable Codex MCP registration, the Claude-orchestrates/Codex-implements working mode, the claudex launcher for running Claude Code against GPT models through cliproxyapi, and a cross-platform statusline with real GPT context and official quota.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Victor"
+  },
+  "dependencies": [
+    "claude-hud"
+  ],
+  "commands": [
+    "./commands/setup.md"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "bootstrap",
+    "statusline",
+    "codex",
+    "mcp",
+    "cliproxyapi",
+    "claudex",
+    "claude-hud",
+    "portable"
+  ]
+}

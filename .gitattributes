@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+# Windows shims must keep CRLF or cmd.exe mis-parses them.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# PowerShell is CRLF by convention and must stay BOM-free.
+*.ps1 text eol=crlf
+
+# POSIX launchers and scripts must stay LF even on Windows checkouts.
+*.sh text eol=lf
+bin/statusline text eol=lf
+templates/claudex.sh text eol=lf

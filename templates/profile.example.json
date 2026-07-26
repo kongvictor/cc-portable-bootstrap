@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "Copy to ~/.config/cc-portable-bootstrap/profile.json and edit. Mode 600.",
+    "This file holds machine-specific topology and must never be committed.",
+    "",
+    "runsLocalProxy: does this host run its own cliproxyapi instance?",
+    "servesOthers:   does this host serve other machines (hub)? Only the hub sets true.",
+    "endpoints:      candidates, tried in ascending priority order.",
+    "                HTTP is allowed only for strict loopback; anything else must be HTTPS.",
+    "                A tunnelled hub is still loopback here, because the tunnel maps it",
+    "                to a local port.",
+    "tunnel:         optional. Only set it when the endpoint needs an SSH tunnel opened",
+    "                first. host is an ssh config alias."
+  ],
+  "schemaVersion": 1,
+  "runsLocalProxy": true,
+  "servesOthers": false,
+  "endpoints": [
+    {
+      "label": "hub-tunnel",
+      "url": "http://127.0.0.1:19001",
+      "priority": 10,
+      "tunnel": {
+        "host": "my-hub-ssh-alias",
+        "localPort": 19001,
+        "remotePort": 8317
+      }
+    },
+    {
+      "label": "local",
+      "url": "http://127.0.0.1:8317",
+      "priority": 100
+    }
+  ],
+  "activeEndpoint": null
+}

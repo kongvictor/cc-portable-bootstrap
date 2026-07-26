@@ -1,0 +1,19 @@
+#!/bin/sh
+# Stable POSIX launcher installed under the Claude config directory.
+set -u
+
+HERE=$(CDPATH= cd "$(dirname "$0")" 2>/dev/null && pwd) || exit 0
+RUNTIME="$HERE/runtime.mjs"
+[ -f "$RUNTIME" ] || RUNTIME="$HERE/../core/statusline/runtime.mjs"
+[ -f "$RUNTIME" ] || exit 0
+
+NODE_BIN=${CC_BOOTSTRAP_NODE_BIN:-${CLIPROXY_NODE_BIN:-}}
+if [ -z "$NODE_BIN" ] && [ -f "$HERE/.node-path" ]; then
+  IFS= read -r NODE_BIN < "$HERE/.node-path" || NODE_BIN=
+fi
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+  NODE_BIN=$(command -v node 2>/dev/null || true)
+fi
+[ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ] || exit 0
+
+exec "$NODE_BIN" "$RUNTIME"

@@ -1,0 +1,34 @@
+#!/bin/sh
+# Local guard against committing secrets or machine topology.
+# Install with: git config core.hooksPath scripts
+set -eu
+
+fail() {
+  printf 'pre-commit: %s\n' "$1" >&2
+  exit 1
+}
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -n "$staged" ] || exit 0
+
+for file in $staged; do
+  case "$file" in
+    tests/*|.github/*) continue ;;
+  esac
+  [ -f "$file" ] || continue
+
+  if git show ":$file" | grep -qE '(sk-[A-Za-z0-9_-]{16,}|mk-[A-Za-z0-9_-]{16,})'; then
+    fail "$file looks like it contains an API or management key"
+  fi
+  if git show ":$file" | grep -q 'BEGIN .*PRIVATE KEY'; then
+    fail "$file contains a private key"
+  fi
+  if git show ":$file" | grep -qE '(^|[^0-9.])(10\.[0-9]{1,3}|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9]{1,3}'; then
+    fail "$file contains a private network address; put topology in the local profile"
+  fi
+done
+
+# The real profile is machine-specific and must never be committed.
+if printf '%s\n' "$staged" | grep -qx 'profile.json'; then
+  fail 'refusing to commit profile.json'
+fi

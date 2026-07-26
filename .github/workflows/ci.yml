@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # The whole point of this matrix is Windows: the maintainer's machine has no
+    # PowerShell, so the native Windows launcher and installer paths can only be
+    # exercised here.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18', '22']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        run: npm run check
+      - name: POSIX syntax check
+        if: runner.os != 'Windows'
+        run: npm run check:posix
+      - name: PowerShell parse check
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in Get-ChildItem -Recurse -Filter *.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          }
+      - name: Test
+        run: npm test
+
+  line-endings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cmd shims must be CRLF and BOM-free
+        run: |
+          set -euo pipefail
+          status=0
+          for file in $(git ls-files '*.cmd'); do
+            if head -c 3 "$file" | od -An -tx1 | grep -q 'ef bb bf'; then
+              echo "::error file=$file::UTF-8 BOM would break cmd.exe parsing"
+              status=1
+            fi
+            if grep -qU $'[^\r]\n' "$file"; then
+              echo "::error file=$file::expected CRLF line endings"
+              status=1
+            fi
+          done
+          exit $status
+      - name: whitespace check
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: no committed topology
+        run: |
+          set -euo pipefail
+          # Private addresses, ssh aliases and personal hosts must live in the
+          # local profile, never in the repository.
+          if git grep -nIE '(^|[^0-9.])(10\.[0-9]{1,3}|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9]{1,3}' \
+             -- . ':!tests' ':!.github'; then
+            echo "::error::private network address committed outside tests"
+            exit 1
+          fi
+          if git grep -nIE '\b[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' \
+             -- . ':!*.json' ':!.github' | grep -v 'example\.\|\.test\b'; then
+            echo "::error::email-like string committed"
+            exit 1
+          fi

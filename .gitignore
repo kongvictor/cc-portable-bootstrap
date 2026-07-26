@@ -1,0 +1,24 @@
+# Never commit secrets or machine-specific topology.
+.secrets/
+**/cliproxy_apikey
+**/cliproxy_mgmtkey
+profile.json
+!templates/profile.example.json
+
+# Runtime artifacts
+cliproxy-usage-*.json
+.refresh-attempt
+.snapshot.lock
+.cc-portable-bootstrap-config.lock
+.node-path
+*.backup-*
+*.tmp-*
+*.log
+
+# Test sandboxes
+tests/.sandbox*/
+
+# OS / editor
+.DS_Store
+node_modules/
+__pycache__/
