@@ -17,6 +17,21 @@ export function unstableBinaryReason(candidate) {
   return null;
 }
 
+// `where` also lists extensionless siblings of a shim (npm ships a POSIX script
+// next to codex.cmd). Windows cannot execute those, so only PATHEXT candidates
+// count, in the order PATHEXT itself declares.
+function pickWindowsExecutable(lines, env) {
+  const extensions = String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  for (const extension of extensions) {
+    const match = lines.find((line) => line.toLowerCase().endsWith(extension));
+    if (match) return match;
+  }
+  return lines[0] || null;
+}
+
 export function commandExists(command, env = process.env) {
   const finder = process.platform === 'win32' ? 'where' : 'command';
   const args = process.platform === 'win32' ? [command] : ['-v', command];
@@ -24,19 +39,56 @@ export function commandExists(command, env = process.env) {
     ? spawnSync(finder, args, { encoding: 'utf8', env, windowsHide: true })
     : spawnSync('sh', ['-c', `command -v ${JSON.stringify(command)}`], { encoding: 'utf8', env });
   if (result.error || result.status !== 0) return null;
-  const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0];
-  return first || null;
+  const lines = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (process.platform === 'win32') return pickWindowsExecutable(lines, env);
+  return lines[0] || null;
+}
+
+// CreateProcess cannot launch a batch file, so npm-installed shims (`codex.cmd`,
+// `claude.cmd`) have to go through cmd.exe. Every argument is wrapped in quotes
+// and the whole payload is passed verbatim, so cmd.exe strips only the outer
+// pair and never re-parses separators inside an argument.
+const WINDOWS_BATCH_PATTERN = /\.(?:cmd|bat)$/i;
+
+function buildCmdCommandLine(command, args) {
+  const parts = [command, ...args].map((part) => String(part));
+  // A quote ends the quoted run and `%` starts an expansion; neither can be
+  // escaped reliably inside `cmd /c`, so such an argument is refused instead of
+  // being silently mangled into a different command.
+  const unsafe = parts.find((part) => /["%\r\n]/.test(part));
+  if (unsafe) return null;
+  return `"${parts.map((part) => `"${part}"`).join(' ')}"`;
 }
 
 export function run(command, args, { env = process.env, timeoutMs = 600_000, cwd } = {}) {
-  const result = spawnSync(command, args, {
+  const useCmd = process.platform === 'win32' && WINDOWS_BATCH_PATTERN.test(String(command));
+  let target = command;
+  let targetArgs = args;
+  const options = {
     encoding: 'utf8',
     env,
     cwd,
     timeout: timeoutMs,
     maxBuffer: 4 * 1024 * 1024,
     windowsHide: true,
-  });
+  };
+
+  if (useCmd) {
+    const commandLine = buildCmdCommandLine(command, args);
+    if (!commandLine) {
+      return {
+        ok: false,
+        status: null,
+        stdout: '',
+        stderr: `Refusing to run ${command}: an argument contains a character cmd.exe cannot quote safely`,
+      };
+    }
+    target = process.env.COMSPEC || 'cmd.exe';
+    targetArgs = ['/d', '/s', '/c', commandLine];
+    options.windowsVerbatimArguments = true;
+  }
+
+  const result = spawnSync(target, targetArgs, options);
   return {
     ok: !result.error && result.status === 0,
     status: result.status,

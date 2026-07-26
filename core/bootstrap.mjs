@@ -253,7 +253,13 @@ function spawnExecutableSync(executable, args, options = {}) {
   if (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable)) {
     const quoteForCmd = (value) => `"${String(value).replaceAll('"', '""')}"`;
     const commandLine = [executable, ...args].map(quoteForCmd).join(' ');
-    return spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], options);
+    // Node quotes arguments with backslash escapes, which cmd.exe does not
+    // understand, so the payload has to be handed over verbatim. `/s` then
+    // strips exactly the outer quote pair and leaves each argument intact.
+    return spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${commandLine}"`], {
+      ...options,
+      windowsVerbatimArguments: true,
+    });
   }
   return spawnSync(executable, args, options);
 }

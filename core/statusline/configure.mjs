@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -204,7 +205,7 @@ export function isManagedStatusCommand(command) {
   const dir = '(?:cc-portable-bootstrap|cliproxy-usage-statusline)';
   const base = '(?:statusline|cliproxy-usage)';
   const legacyShell = /^(?:[a-z]:)?\/(?:.*\/)?cliproxy-usage(?:-statusline)?\/(?:[^/'"]+\/)?statusline\/statusline\.sh$/;
-  const stablePosix = new RegExp(`^(?:[a-z]:)?/(?:.*/)?${dir}/${base}$`);
+  const stablePosix = new RegExp(`^(?:[a-z]:)?/(?:.*/)?${dir}/${base}(?:\\.cmd)?$`);
   const stableCmd = new RegExp(`^cmd\\.exe /d /s /c ""[^"]*/${dir}/${base}\\.cmd""$`);
   const stablePowerShell = new RegExp(
     `^powershell\\.exe -nologo -noprofile -executionpolicy bypass -file "[^"]*/${dir}/${base}\\.ps1"$`,
@@ -223,12 +224,47 @@ function quotePosix(value) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
-export function launcherCommand(launcherPath, platform = process.platform) {
+// Claude Code runs the status line through Git Bash whenever Git Bash is
+// installed, and only falls back to PowerShell otherwise. That choice decides
+// how the recorded command is parsed: Git Bash rewrites `/d` and `/s` into
+// filesystem paths, so `cmd.exe /d /s /c ...` starts an interactive cmd.exe that
+// prints its banner and echoes the status-line JSON instead of rendering it.
+// System32\bash.exe is the WSL launcher, not Git Bash, so it does not count.
+export function hasGitBash(env = process.env) {
+  const known = [
+    env.ProgramFiles ? path.win32.join(env.ProgramFiles, 'Git', 'bin', 'bash.exe') : null,
+    env['ProgramFiles(x86)'] ? path.win32.join(env['ProgramFiles(x86)'], 'Git', 'bin', 'bash.exe') : null,
+    env.LOCALAPPDATA ? path.win32.join(env.LOCALAPPDATA, 'Programs', 'Git', 'bin', 'bash.exe') : null,
+  ].filter(Boolean);
+  if (known.some((candidate) => fs.existsSync(candidate))) return true;
+
+  const found = spawnSync('where', ['bash'], { encoding: 'utf8', env, windowsHide: true });
+  if (found.error || found.status !== 0) return false;
+  return String(found.stdout || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .some((line) => /bash\.exe$/i.test(line) && !/[\\/]system32[\\/]/i.test(line));
+}
+
+function toPosixPath(windowsPath) {
+  const forward = windowsPath.replace(/\\/g, '/');
+  const drive = forward.match(/^([A-Za-z]):\//);
+  return drive ? `/${drive[1].toLowerCase()}/${forward.slice(3)}` : forward;
+}
+
+export function launcherCommand(launcherPath, platform = process.platform, env = process.env) {
   const resolved = platform === 'win32' ? path.win32.resolve(launcherPath) : path.resolve(launcherPath);
   if (resolved.toLowerCase().endsWith('.ps1')) {
     return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "${resolved}"`;
   }
-  if (platform === 'win32' || resolved.toLowerCase().endsWith('.cmd')) {
+  if (platform === 'win32') {
+    // Git Bash executes a .cmd shim directly, so the bare quoted path is both
+    // the shortest form and the only one that survives MSYS path rewriting.
+    if (hasGitBash(env)) return quotePosix(toPosixPath(resolved));
+    return `cmd.exe /d /s /c ""${resolved}""`;
+  }
+  if (resolved.toLowerCase().endsWith('.cmd')) {
     return `cmd.exe /d /s /c ""${resolved}""`;
   }
   return quotePosix(resolved);

@@ -18,9 +18,39 @@ function configuredPath(value, fallback) {
   return path.resolve(selected);
 }
 
+// Mirrors core/profile.mjs profilePath(). The status-line runtime is installed
+// as a standalone copy without that module, so the lookup is duplicated rather
+// than imported; both must stay in sync.
+function profilePath(env) {
+  const override = env.CC_BOOTSTRAP_PROFILE_FILE?.trim();
+  if (override) return path.resolve(override);
+  const configHome = env.XDG_CONFIG_HOME?.trim();
+  const base = configHome ? path.resolve(configHome) : path.join(os.homedir(), '.config');
+  return path.join(base, 'cc-portable-bootstrap', 'profile.json');
+}
+
+// Claude Code spawns the status line from the user's shell, which normally has
+// no CLIPROXY_URL, so the machine profile is the only place these endpoints are
+// recorded. Without this fallback the refresh returns immediately every time and
+// the usage segments silently freeze at whatever was last written to the cache.
+function profileEndpoints(env) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(profilePath(env), 'utf8'));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed?.endpoints)) return [];
+  const byPriority = [...parsed.endpoints].sort(
+    (left, right) => Number(right?.priority || 0) - Number(left?.priority || 0),
+  );
+  const active = byPriority.filter((entry) => entry?.label === parsed.activeEndpoint);
+  return [...active, ...byPriority].map((entry) => entry?.url).filter(Boolean);
+}
+
 export function snapshotConfig(env = process.env) {
   const configuredBase = env.CLIPROXY_URL?.trim();
-  const candidates = configuredBase ? [configuredBase] : [];
+  const candidates = configuredBase ? [configuredBase] : profileEndpoints(env);
   return {
     dataDir: configuredPath(env.CLIPROXY_USAGE_DIR, '~/.cache/cliproxy-usage'),
     managementKeyFile: configuredPath(

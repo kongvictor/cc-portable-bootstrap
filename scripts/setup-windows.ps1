@@ -24,11 +24,16 @@ $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $bootstrap = Join-Path (Split-Path -Parent $scriptDir) 'core\bootstrap.mjs'
-$nodeCommand = Get-Command node -CommandType Application -ErrorAction SilentlyContinue
+# Several node.exe copies can be on PATH; keep the first match so $nodePath stays a string.
+$nodeCommand = @(Get-Command node -CommandType Application -ErrorAction SilentlyContinue) |
+    Select-Object -First 1
 if ($null -eq $nodeCommand) {
     throw 'setup-windows.ps1: Node.js 18+ is required'
 }
-$nodeMajor = [int] (& $nodeCommand.Path -p 'Number(process.versions.node.split(".")[0])')
+$nodePath = $nodeCommand.Path
+# Windows PowerShell strips embedded double quotes from native-command arguments,
+# so this expression must not contain any.
+$nodeMajor = [int] (& $nodePath -p 'Number(process.versions.node.split(String.fromCharCode(46))[0])')
 if ($nodeMajor -lt 18) {
     throw 'setup-windows.ps1: Node.js 18+ is required'
 }
@@ -101,7 +106,7 @@ function New-CoreArguments {
 function Invoke-Core {
     param([string[]] $Arguments)
 
-    $lines = @(& $nodeCommand.Path @Arguments 2>&1 | ForEach-Object { $_.ToString() })
+    $lines = @(& $nodePath @Arguments 2>&1 | ForEach-Object { $_.ToString() })
     $exitCode = $LASTEXITCODE
     return [PSCustomObject]@{ ExitCode = $exitCode; Lines = @($lines) }
 }
