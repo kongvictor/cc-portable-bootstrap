@@ -103,6 +103,7 @@ export function installStatusline({
   installDir,
   sourceRoot = REPO_ROOT,
   platform = process.platform,
+  env = process.env,
   nodeBin = process.execPath,
   proxyUrl,
   force = false,
@@ -131,6 +132,7 @@ export function installStatusline({
       launcherPath,
       proxyUrl,
       platform,
+      env,
       force,
       dryRun: true,
       configureHud,
@@ -151,6 +153,7 @@ export function installStatusline({
     launcherPath,
     proxyUrl,
     platform,
+    env,
     force,
     configureHud,
   });

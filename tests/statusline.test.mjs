@@ -626,11 +626,14 @@ test('native Windows setup installs cmd and preserves BOM/CRLF stdin through spa
   const root = temporaryDirectory('statusline-windows');
   const claudeDir = path.join(root, 'Claude 配置');
   const installDir = path.join(root, 'stable install 状态栏');
+  // Pin the non-Git-Bash form: this host may or may not have Git Bash, and the
+  // Git Bash branch is asserted separately below.
   installStatusline({
     claudeDir,
     installDir,
     sourceRoot: repository,
     proxyUrl: 'http://127.0.0.1:18080',
+    env: { ...process.env, CC_BOOTSTRAP_GIT_BASH: '0' },
   });
   const configured = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
   const cmdLauncher = path.join(installDir, 'statusline.cmd');
@@ -640,8 +643,25 @@ test('native Windows setup installs cmd and preserves BOM/CRLF stdin through spa
     extra: ['statusline.ps1'],
   });
   assert.equal(configured.env.CLIPROXY_URL, 'http://127.0.0.1:18080');
-  assert.equal(configured.statusLine.command, launcherCommand(cmdLauncher, 'win32'));
+  assert.equal(
+    configured.statusLine.command,
+    launcherCommand(cmdLauncher, 'win32', { CC_BOOTSTRAP_GIT_BASH: '0' }),
+  );
   assert.match(configured.statusLine.command, /^cmd\.exe \/d \/s \/c /);
+
+  // With Git Bash present, Claude Code runs the status line through it, so the
+  // recorded command must be the POSIX form it can actually execute.
+  installStatusline({
+    claudeDir,
+    installDir,
+    sourceRoot: repository,
+    force: true,
+    env: { ...process.env, CC_BOOTSTRAP_GIT_BASH: '1' },
+  });
+  const viaGitBash = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
+  assert.match(viaGitBash.statusLine.command, /^'\/[a-z]\//);
+  assert.match(viaGitBash.statusLine.command, /statusline\.cmd'$/);
+  assert.ok(isManagedStatusCommand(viaGitBash.statusLine.command));
   assert.ok(fs.existsSync(cmdLauncher));
   assert.ok(fs.existsSync(powershellLauncher));
 
