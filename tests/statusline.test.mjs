@@ -23,7 +23,11 @@ import {
   isManagedStatusCommand,
   launcherCommand,
 } from '../core/statusline/configure.mjs';
-import { installStatusline, launchersFor } from '../core/statusline/install.mjs';
+import {
+  installStatusline,
+  installedRuntimeIsStale,
+  launchersFor,
+} from '../core/statusline/install.mjs';
 import {
   buildAnthropicSnapshot,
   buildOpenAiSnapshot,
@@ -573,6 +577,32 @@ test('POSIX install places a stable launcher in an isolated Claude directory', {
   });
   assert.equal(launch.status, 0, launch.stderr);
   assert.match(stripAnsi(launch.stdout), /16% \(in:100, cache:60k\)/);
+});
+
+test('an installed runtime older than the checkout is detected as stale', {
+  skip: process.platform === 'win32',
+}, () => {
+  // After `git pull` the launcher path and the statusLine setting are unchanged,
+  // so without a content comparison an upgrade would silently keep running the
+  // old runtime — which is exactly how a fix fails to reach a deployed machine.
+  const root = temporaryDirectory('statusline-stale');
+  const claudeDir = path.join(root, '.claude');
+  const installDir = path.join(root, 'install');
+  installStatusline({ claudeDir, installDir, sourceRoot: repository });
+
+  assert.equal(installedRuntimeIsStale({ installDir, sourceRoot: repository }), false);
+
+  const installed = path.join(installDir, 'snapshot.mjs');
+  fs.writeFileSync(installed, `${fs.readFileSync(installed, 'utf8')}\n// stale\n`);
+  assert.equal(installedRuntimeIsStale({ installDir, sourceRoot: repository }), true);
+
+  // Reinstalling converges it again.
+  installStatusline({ claudeDir, installDir, sourceRoot: repository });
+  assert.equal(installedRuntimeIsStale({ installDir, sourceRoot: repository }), false);
+
+  // A missing file counts as stale rather than passing silently.
+  fs.rmSync(path.join(installDir, 'layout.mjs'));
+  assert.equal(installedRuntimeIsStale({ installDir, sourceRoot: repository }), true);
 });
 
 test('native Windows setup installs cmd and preserves BOM/CRLF stdin through spaced paths', {

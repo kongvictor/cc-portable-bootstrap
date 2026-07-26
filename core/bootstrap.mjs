@@ -10,7 +10,12 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
 import { isManagedStatusCommand, launcherCommand } from './statusline/configure.mjs';
-import { installDirFor, installStatusline, launchersFor } from './statusline/install.mjs';
+import {
+  installDirFor,
+  installStatusline,
+  installedRuntimeIsStale,
+  launchersFor,
+} from './statusline/install.mjs';
 import {
   applyProvisioning,
   inspectProvisioning,
@@ -805,7 +810,10 @@ function inspectStatusline(options) {
   const installed = fs.existsSync(launcher);
   if (!configured) return { state: installed ? 'installed-not-configured' : 'missing', installDir };
   if (configured === launcherCommand(launcher)) {
-    return { state: installed ? 'current' : 'configured-not-installed', installDir };
+    if (!installed) return { state: 'configured-not-installed', installDir };
+    // Configured and present, but the repository may have moved on since.
+    const stale = installedRuntimeIsStale({ installDir, sourceRoot: ROOT_DIR });
+    return { state: stale ? 'stale' : 'current', installDir };
   }
   return {
     state: isManagedStatusCommand(configured) ? 'predecessor' : 'foreign',
@@ -877,6 +885,7 @@ function statuslineChangeFor(statusline, options) {
   if (options.statusline === false) return 'none';
   if (statusline.state === 'current') return 'none';
   if (statusline.state === 'foreign') return options.force ? 'replace' : 'blocked';
+  if (statusline.state === 'stale') return 'update';
   return statusline.state === 'predecessor' ? 'upgrade' : 'install';
 }
 
@@ -935,6 +944,9 @@ function printCheck(context) {
   } else if (statusline.state === 'foreign') {
     healthy = false;
     console.log('[warning] statusline: an unrecognized statusLine is configured; review it, then rerun setup with --force');
+  } else if (statusline.state === 'stale') {
+    healthy = false;
+    console.log('[needs-setup] statusline: the installed runtime is older than this checkout; rerun setup');
   } else if (statusline.state === 'predecessor') {
     console.log('[needs-setup] statusline: a predecessor launcher is configured; setup will upgrade it');
   } else {

@@ -26,6 +26,32 @@ export function installDirFor(claudeDir) {
   return path.join(claudeDir, 'cc-portable-bootstrap');
 }
 
+// After `git pull`, the launcher path and the statusLine setting are unchanged,
+// so nothing else in the plan notices that the installed runtime is older than
+// the repository. Comparing the bytes is what makes an upgrade actually apply.
+export function installedRuntimeIsStale({
+  installDir,
+  sourceRoot = REPO_ROOT,
+  platform = process.platform,
+} = {}) {
+  const launchers = launchersFor(platform);
+  const files = [
+    ...RUNTIME_FILES.map((name) => [path.join(sourceRoot, 'core', 'statusline', name), name]),
+    ...[launchers.primary, ...launchers.extra].map((name) => [path.join(sourceRoot, 'bin', name), name]),
+  ];
+
+  for (const [source, name] of files) {
+    const installed = path.join(installDir, name);
+    try {
+      if (!fs.readFileSync(source).equals(fs.readFileSync(installed))) return true;
+    } catch {
+      // Missing on either side counts as stale; install will put it right.
+      return true;
+    }
+  }
+  return false;
+}
+
 // The refresh path runs every few seconds, so Windows uses a lightweight .cmd
 // that execs node directly; PowerShell is only kept as a compatibility entry.
 export function launchersFor(platform = process.platform) {
