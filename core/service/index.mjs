@@ -11,13 +11,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { commandExists, ensurePrivateDir, run } from '../deps/common.mjs';
+import { ensurePrivateDir, resolveBrew, run } from '../deps/common.mjs';
 
 export const SERVICE_LABEL = 'com.cc-portable-bootstrap.cliproxyapi';
 export const TASK_NAME = 'cc-portable-bootstrap cliproxyapi';
 
 export function backendFor(platform = process.platform, { viaBrew = false, env = process.env } = {}) {
-  if (platform === 'darwin') return viaBrew && commandExists('brew', env) ? 'brew' : 'launchd';
+  if (platform === 'darwin') return viaBrew && resolveBrew(env) ? 'brew' : 'launchd';
   if (platform === 'linux') return 'systemd';
   if (platform === 'win32') return 'schtasks';
   return 'unsupported';
@@ -88,7 +88,7 @@ function writePrivateFile(file, contents) {
 export function serviceStatus({ home = os.homedir(), platform = process.platform, viaBrew = false, env = process.env } = {}) {
   const backend = backendFor(platform, { viaBrew, env });
   if (backend === 'brew') {
-    const result = run('brew', ['services', 'list'], { env, timeoutMs: 30_000 });
+    const result = run(resolveBrew(env), ['services', 'list'], { env, timeoutMs: 30_000 });
     const line = result.stdout.split(/\r?\n/).find((row) => /^cliproxyapi\s/.test(row.trim()));
     return { backend, installed: Boolean(line), running: Boolean(line && /\bstarted\b/i.test(line)) };
   }
@@ -127,7 +127,7 @@ export function installService({
   if (!binary) throw new Error('A cliproxyapi binary is required to install the service');
 
   if (backend === 'brew') {
-    const result = run('brew', ['services', 'start', 'cliproxyapi'], { env, timeoutMs: 120_000 });
+    const result = run(resolveBrew(env), ['services', 'start', 'cliproxyapi'], { env, timeoutMs: 120_000 });
     if (!result.ok) throw new Error('brew services start cliproxyapi failed');
     return { backend, action: 'installed' };
   }
@@ -179,7 +179,7 @@ export function removeService({
   if (dryRun) return { backend, action: 'would-remove' };
 
   if (backend === 'brew') {
-    run('brew', ['services', 'stop', 'cliproxyapi'], { env, timeoutMs: 120_000 });
+    run(resolveBrew(env), ['services', 'stop', 'cliproxyapi'], { env, timeoutMs: 120_000 });
     return { backend, action: 'removed' };
   }
   if (backend === 'launchd') {

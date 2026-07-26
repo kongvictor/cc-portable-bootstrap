@@ -138,6 +138,9 @@ function parseArgs(argv) {
   }
 
   options.home = path.resolve(options.home);
+  // Managed file paths always need a concrete directory, but the Claude CLI must
+  // only be told about one when the user actually chose it — see sanitizedChildEnv.
+  options.explicitConfigDir = options.configDir ? path.resolve(options.configDir) : null;
   options.configDir = path.resolve(options.configDir || path.join(options.home, '.claude'));
   if (options.profile === undefined) options.profile = defaultProfile(options.home);
   if (options.profile) options.profile = path.resolve(options.profile);
@@ -228,9 +231,18 @@ function assertStableManagedPath(target, options) {
   return expected;
 }
 
-function sanitizedChildEnv(home, configDir = path.join(home, '.claude')) {
-  const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: configDir };
+function sanitizedChildEnv(home, configDir = null) {
+  const env = { ...process.env, HOME: home };
   if (process.platform === 'win32') env.USERPROFILE = home;
+
+  // Only pin CLAUDE_CONFIG_DIR when the caller asked for a specific directory
+  // (tests, portable installs). Setting it unconditionally moves where the CLI
+  // looks for user-scope MCP servers: with it set, `claude mcp` reads
+  // <configDir>/.claude.json instead of ~/.claude.json. That made check report a
+  // registered server as missing, and would have made setup write a shadow
+  // registration to the wrong file.
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
+
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
   delete env.ANTHROPIC_BASE_URL;
@@ -366,7 +378,7 @@ function parseMcpGet(stdout) {
   return result;
 }
 
-function inspectMcp(claudeBin, home, configDir = path.join(home, '.claude')) {
+function inspectMcp(claudeBin, home, configDir = null) {
   const result = spawnExecutableSync(claudeBin, ['mcp', 'get', 'codex'], {
     encoding: 'utf8',
     env: sanitizedChildEnv(home, configDir),
@@ -798,7 +810,7 @@ function inspectStatusline(options) {
 function buildContext(options) {
   const claudeBin = findClaude(options);
   if (!claudeBin) throw new Error('Claude executable not found; install Claude Code or pass --claude');
-  const currentMcp = inspectMcp(claudeBin, options.home, options.configDir);
+  const currentMcp = inspectMcp(claudeBin, options.home, options.explicitConfigDir);
   const codexBin = findCodex(options, currentMcp);
   if (!codexBin) {
     throw new Error('No stable Codex binary with `mcp-server` support found (cmux/TEMP shims are excluded)');
@@ -826,7 +838,7 @@ function buildCheckContext(options) {
   let mcpInspection = claudeBin ? 'ok' : 'unavailable';
   if (claudeBin) {
     try {
-      currentMcp = inspectMcp(claudeBin, options.home, options.configDir);
+      currentMcp = inspectMcp(claudeBin, options.home, options.explicitConfigDir);
     } catch {
       mcpInspection = 'failed';
     }
@@ -1097,7 +1109,7 @@ function createBackup(options, context, label = 'setup') {
   return { id, directory, manifest };
 }
 
-function runClaudeMcp(claudeBin, args, home, configDir = path.join(home, '.claude')) {
+function runClaudeMcp(claudeBin, args, home, configDir = null) {
   const result = spawnExecutableSync(claudeBin, ['mcp', ...args], {
     encoding: 'utf8',
     env: sanitizedChildEnv(home, configDir),
@@ -1132,7 +1144,7 @@ function withMcpOperationLock(options, callback) {
   }
 }
 
-function addCodexMcp(claudeBin, codexBin, home, args = ['mcp-server'], configDir = path.join(home, '.claude')) {
+function addCodexMcp(claudeBin, codexBin, home, args = ['mcp-server'], configDir = null) {
   return runClaudeMcp(
     claudeBin,
     ['add', '--scope', 'user', '--transport', 'stdio', 'codex', '--', codexBin, ...args],
@@ -1174,7 +1186,7 @@ function applyMcpDesired(context, options, mutation) {
     throw new Error('Refusing automatic Codex MCP replacement because `claude mcp remove` has no compare-and-swap protection; remove the old user-scope definition manually, then rerun setup');
   }
   withMcpOperationLock(options, () => {
-    const current = inspectMcp(context.claudeBin, options.home, options.configDir);
+    const current = inspectMcp(context.claudeBin, options.home, options.explicitConfigDir);
     if (!mcpDefinitionsEqual(current, context.currentMcp)) {
       throw new Error('Codex MCP changed concurrently after planning; refusing setup');
     }
@@ -1184,7 +1196,7 @@ function applyMcpDesired(context, options, mutation) {
       context.codexBin,
       options.home,
       ['mcp-server'],
-      options.configDir,
+      options.explicitConfigDir,
       standardMcpShape(context.codexBin),
       mutation,
     );
@@ -1246,7 +1258,7 @@ function restoreMcp(
   if (issue) throw new Error(`Backup MCP cannot be safely restored because ${issue}`);
 
   withMcpOperationLock(options, () => {
-    const current = inspectMcp(claudeBin, options.home, options.configDir);
+    const current = inspectMcp(claudeBin, options.home, options.explicitConfigDir);
     if (mcpDefinitionsEqual(current, priorShape)) return;
     if (expectedCurrent !== undefined
         && !mcpDefinitionsEqual(current, expectedCurrent)
@@ -1262,7 +1274,7 @@ function restoreMcp(
         priorShape.command,
         options.home,
         priorShape.args,
-        options.configDir,
+        options.explicitConfigDir,
         priorShape,
         mutation,
       );
@@ -1466,7 +1478,7 @@ function loadBackup(options) {
 function buildPreRestoreContext(backup, claudeBin, options) {
   validateRestoreManifest(backup.manifest, backup.directory, options);
   const mcpChanged = Boolean(backup.manifest.mcp?.changed);
-  const currentMcp = mcpChanged ? inspectMcp(claudeBin, options.home, options.configDir) : parseMcpGet('');
+  const currentMcp = mcpChanged ? inspectMcp(claudeBin, options.home, options.explicitConfigDir) : parseMcpGet('');
   const issue = mcpChanged ? mcpReplacementIssue(currentMcp) : null;
   if (issue) throw new Error(`Refusing restore because the current Codex MCP cannot be safely backed up: ${issue}`);
   return {

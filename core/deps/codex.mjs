@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { commandExists, ensurePrivateDir, plan, run, unstableBinaryReason } from './common.mjs';
+import { commandExists, ensurePrivateDir, plan, resolveBrew, run, unstableBinaryReason } from './common.mjs';
 
 export const OFFICIAL_INSTALL_SH = 'https://chatgpt.com/codex/install.sh';
 export const OFFICIAL_INSTALL_PS1 = 'https://chatgpt.com/codex/install.ps1';
@@ -73,7 +73,7 @@ export function detectCodex({
 export function planCodex(detection, { platform = process.platform, env = process.env } = {}) {
   if (detection.ok) return plan('none', `Codex present: ${detection.binary}`);
 
-  if (platform === 'darwin' && commandExists('brew', env)) {
+  if (platform === 'darwin' && resolveBrew(env)) {
     return plan('install', 'brew install --cask codex', { channel: 'brew' });
   }
   // Verify npm actually runs; presence on PATH is not enough.
@@ -115,7 +115,7 @@ export async function installCodex({
   downloader,
 } = {}) {
   if (channel === 'brew') {
-    const result = run('brew', ['install', '--cask', 'codex'], { env });
+    const result = run(resolveBrew(env), ['install', '--cask', 'codex'], { env });
     if (!result.ok) throw new Error('brew install --cask codex failed');
   } else if (channel === 'npm') {
     const result = run('npm', ['install', '-g', '@openai/codex'], { env });

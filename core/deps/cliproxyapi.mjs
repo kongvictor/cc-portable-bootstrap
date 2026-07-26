@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { commandExists, ensurePrivateDir, plan, run, userBinDir } from './common.mjs';
+import { commandExists, ensurePrivateDir, plan, resolveBrew, run, userBinDir } from './common.mjs';
 import { downloadVerified, fetchText, parseChecksumManifest } from './download.mjs';
 
 export const RELEASE_API = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
@@ -34,20 +34,39 @@ export function binaryPathFor({ home, platform = process.platform } = {}) {
   return path.join(userBinDir(home), platform === 'win32' ? 'cliproxyapi.exe' : 'cliproxyapi');
 }
 
+// A non-interactive shell (ssh, launchd, a scheduled task) frequently has no
+// Homebrew on PATH, so `command -v brew` alone would report a brew install as
+// absent — and setup would then download a second copy. Fall back to the two
+// standard prefixes.
 export function brewPrefix(env = process.env) {
-  const brew = commandExists('brew', env);
+  const brew = resolveBrew(env);
   if (!brew) return null;
   const result = run(brew, ['--prefix'], { env, timeoutMs: 20_000 });
-  return result.ok ? result.stdout.trim() : null;
+  return result.ok ? result.stdout.trim() : path.dirname(path.dirname(brew));
 }
 
-export function detectCliproxyapi({ home, env = process.env, platform = process.platform } = {}) {
+export function knownCliproxyapiPaths({ home, platform = process.platform } = {}) {
+  if (platform === 'win32') return [binaryPathFor({ home, platform })];
+  return [
+    '/opt/homebrew/bin/cliproxyapi',
+    '/usr/local/bin/cliproxyapi',
+    binaryPathFor({ home, platform }),
+  ];
+}
+
+export function detectCliproxyapi({
+  home,
+  env = process.env,
+  platform = process.platform,
+  knownPaths = knownCliproxyapiPaths({ home, platform }),
+} = {}) {
   const prefix = platform === 'darwin' ? brewPrefix(env) : null;
-  const managed = binaryPathFor({ home, platform });
   const onPath = commandExists('cliproxyapi', env);
   const brewBinary = prefix ? path.join(prefix, 'bin', 'cliproxyapi') : null;
 
-  const binary = [onPath, brewBinary, managed].find((candidate) => candidate && fs.existsSync(candidate)) || null;
+  // PATH first, then the brew prefix, then well-known locations.
+  const binary = [onPath, brewBinary, ...knownPaths]
+    .find((candidate) => candidate && fs.existsSync(candidate)) || null;
   const configFile = configPathFor({ home, platform, brewPrefix: prefix });
   return {
     installed: Boolean(binary),
@@ -61,7 +80,8 @@ export function detectCliproxyapi({ home, env = process.env, platform = process.
 
 export function planCliproxyapi(detection, { platform = process.platform, env = process.env } = {}) {
   if (detection.installed) return plan('none', `cliproxyapi present: ${detection.binary}`);
-  if (platform === 'darwin' && commandExists('brew', env)) {
+  // brewPrefix, not commandExists: brew is often absent from a non-interactive PATH.
+  if (platform === 'darwin' && brewPrefix(env)) {
     return plan('install', 'brew install cliproxyapi', { channel: 'brew' });
   }
   const asset = assetNameFor(platform);
@@ -105,7 +125,7 @@ export async function installCliproxyapi({
   download = downloadVerified,
 } = {}) {
   if (channel === 'brew') {
-    const result = run('brew', ['install', 'cliproxyapi'], { env });
+    const result = run(resolveBrew(env), ['install', 'cliproxyapi'], { env });
     if (!result.ok) throw new Error('brew install cliproxyapi failed');
     return detectCliproxyapi({ home, env, platform });
   }

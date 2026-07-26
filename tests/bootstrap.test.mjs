@@ -78,7 +78,15 @@ if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'codex') {
     process.exit(2);
   }
   state.getCount = Number(state.getCount || 0) + 1;
+  // Mirror the real CLI: CLAUDE_CONFIG_DIR moves where user-scope servers are
+  // read from, so a wrongly-pinned value must look like "no server registered".
+  state.getConfigDirs ||= [];
+  state.getConfigDirs.push(process.env.CLAUDE_CONFIG_DIR ?? null);
   writeState(state);
+  if (process.env.FAKE_MCP_REQUIRE_DEFAULT_CONFIG_DIR === '1' && process.env.CLAUDE_CONFIG_DIR) {
+    console.error('No MCP server named "codex". Configured servers: none');
+    process.exit(0);
+  }
   if (!state.mcp?.present) {
     console.error('No MCP server found with name: codex');
     process.exit(1);
@@ -332,6 +340,50 @@ test('dry-run writes no files, backups, or MCP configuration', () => {
     assert.deepEqual(backupIds(sandbox.home), []);
     assert.equal(stateOf(sandbox).mcp.present, false);
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(SECRET_SENTINEL));
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test('the Claude CLI is not told a config dir the user did not choose', () => {
+  const sandbox = fixtureSandbox('mcp-config-dir');
+  try {
+    createSecret(sandbox.home);
+    // Pre-register the MCP the way a real machine would have it.
+    fs.writeFileSync(sandbox.state, JSON.stringify({
+      mcp: { present: true, command: sandbox.codex, args: ['mcp-server'] },
+      actions: [],
+    }, null, 2));
+
+    // Without an explicit --config-dir, bootstrap must leave CLAUDE_CONFIG_DIR
+    // alone. Pinning it makes `claude mcp` read <configDir>/.claude.json rather
+    // than ~/.claude.json, so an existing registration looks missing and setup
+    // would write a shadow one into the wrong file.
+    const check = spawnSync(process.execPath, [
+      BOOTSTRAP, 'check',
+      '--home', sandbox.home,
+      '--claude', sandbox.claude,
+      '--codex', sandbox.codex,
+      '--no-provision',
+      '--no-profile',
+    ], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        HOME: sandbox.home,
+        FAKE_CLAUDE_STATE: sandbox.state,
+        FAKE_MCP_REQUIRE_DEFAULT_CONFIG_DIR: '1',
+        CLAUDE_CONFIG_DIR: undefined,
+      },
+    });
+
+    assert.match(check.stdout, /Codex MCP: user-scope stdio registration is current/);
+    const observed = stateOf(sandbox).getConfigDirs || [];
+    assert.ok(observed.length > 0, 'expected the fake CLI to be invoked');
+    assert.ok(
+      observed.every((value) => value === null),
+      `CLAUDE_CONFIG_DIR must stay unset, saw ${JSON.stringify(observed)}`,
+    );
   } finally {
     cleanupSandbox(sandbox);
   }

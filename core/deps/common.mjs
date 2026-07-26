@@ -49,6 +49,15 @@ export function platformKey(platform = process.platform, arch = process.arch) {
   return `${platform}-${arch}`;
 }
 
+// Non-interactive shells (ssh, launchd, scheduled tasks) routinely lack Homebrew
+// on PATH. Resolving it by well-known prefix keeps detection honest there, which
+// otherwise reports brew-managed software as missing and reinstalls it.
+export function resolveBrew(env = process.env) {
+  const onPath = commandExists('brew', env);
+  if (onPath) return onPath;
+  return ['/opt/homebrew/bin/brew', '/usr/local/bin/brew'].find((candidate) => fs.existsSync(candidate)) || null;
+}
+
 export function userBinDir(home = os.homedir()) {
   return path.join(home, '.local', 'share', 'cc-portable-bootstrap', 'bin');
 }

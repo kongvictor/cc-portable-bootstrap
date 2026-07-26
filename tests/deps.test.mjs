@@ -17,6 +17,7 @@ import { unstableBinaryReason } from '../core/deps/common.mjs';
 import { detectCodex, planCodex, verifyCodex } from '../core/deps/codex.mjs';
 import {
   assetNameFor,
+  detectCliproxyapi,
   ensureConfig,
   planCliproxyapi,
   renderConfig,
@@ -209,6 +210,36 @@ test('cliproxyapi planning reports unsupported platforms instead of guessing', (
   assert.equal(planCliproxyapi({ installed: true, binary: '/x/cliproxyapi' }).action, 'none');
   const unsupported = planCliproxyapi({ installed: false }, { platform: 'sunos', env: { PATH: '' } });
   assert.equal(unsupported.action, 'unsupported');
+});
+
+test('an existing install is found even when PATH lacks Homebrew', {
+  skip: process.platform === 'win32',
+}, () => {
+  // Reproduces a real miss: over ssh, PATH had no /opt/homebrew, so a
+  // brew-installed cliproxyapi looked absent and setup planned to download a
+  // second copy from GitHub.
+  const root = temporaryDirectory('cliproxy-path');
+  const managed = path.join(root, '.local', 'share', 'cc-portable-bootstrap', 'bin', 'cliproxyapi');
+  fs.mkdirSync(path.dirname(managed), { recursive: true });
+  fs.writeFileSync(managed, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+  const detection = detectCliproxyapi({
+    home: root,
+    env: { PATH: '' },
+    platform: 'linux',
+    knownPaths: [managed],
+  });
+  assert.equal(detection.installed, true);
+  assert.equal(detection.binary, managed);
+  assert.equal(planCliproxyapi(detection, { platform: 'linux', env: { PATH: '' } }).action, 'none');
+
+  const empty = detectCliproxyapi({
+    home: temporaryDirectory('cliproxy-empty'),
+    env: { PATH: '' },
+    platform: 'linux',
+    knownPaths: [],
+  });
+  assert.equal(empty.installed, false);
 });
 
 test('config generation creates local secrets without exposing them', () => {
