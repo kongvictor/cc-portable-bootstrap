@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test",
     "check": "node --check core/bootstrap.mjs && node --check core/statusline/runtime.mjs && node --check core/statusline/configure.mjs && node --check core/statusline/snapshot.mjs",
     "check:posix": "sh -n scripts/setup-posix.sh && sh -n templates/claudex.sh && sh -n bin/statusline"
   }
