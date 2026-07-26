@@ -52,20 +52,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: cmd shims must be CRLF and BOM-free
+        # Checked by reading bytes: grep strips the line terminator before
+        # matching, so a pattern like [^\r]\n can never fire and the previous
+        # check failed on files that were correctly CRLF.
         run: |
           set -euo pipefail
-          status=0
-          for file in $(git ls-files '*.cmd'); do
-            if head -c 3 "$file" | od -An -tx1 | grep -q 'ef bb bf'; then
-              echo "::error file=$file::UTF-8 BOM would break cmd.exe parsing"
-              status=1
-            fi
-            if grep -qU $'[^\r]\n' "$file"; then
-              echo "::error file=$file::expected CRLF line endings"
-              status=1
-            fi
-          done
-          exit $status
+          python3 - "$(git ls-files '*.cmd' | tr '\n' ':')" <<'PY'
+          import sys
+
+          failed = False
+          for name in filter(None, sys.argv[1].split(':')):
+              data = open(name, 'rb').read()
+              if data.startswith(b'\xef\xbb\xbf'):
+                  print(f'::error file={name}::UTF-8 BOM would break cmd.exe parsing')
+                  failed = True
+              # Every LF must be part of a CRLF pair.
+              if data.replace(b'\r\n', b'').find(b'\n') != -1:
+                  print(f'::error file={name}::expected CRLF line endings')
+                  failed = True
+              if not data:
+                  print(f'::error file={name}::file is empty')
+                  failed = True
+          sys.exit(1 if failed else 0)
+          PY
       - name: whitespace check
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 

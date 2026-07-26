@@ -1066,8 +1066,17 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
     return;
   }
   for (const file of [psLauncher, psSetup]) {
-    const script = '$errors=$null; [System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$null,[ref]$errors) | Out-Null; if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }';
-    const parsed = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-Command', script, file], { encoding: 'utf8' });
+    // The path travels in the environment rather than as an argument: with
+    // -Command, trailing arguments are appended to the command text instead of
+    // populating $args, so $args[0] was $null and ParseFile got an empty path.
+    // This also keeps paths containing spaces out of PowerShell's parser.
+    const script = '$errors=$null; '
+      + '[System.Management.Automation.Language.Parser]::ParseFile($env:CC_PARSE_TARGET,[ref]$null,[ref]$errors) | Out-Null; '
+      + 'if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }';
+    const parsed = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-Command', script], {
+      encoding: 'utf8',
+      env: { ...process.env, CC_PARSE_TARGET: file },
+    });
     assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   }
 });
