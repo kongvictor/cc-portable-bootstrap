@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   assertHttps,
@@ -30,7 +31,7 @@ import { planPlugins } from '../core/deps/plugins.mjs';
 // Deliberately not os.tmpdir(): on macOS that is /var/folders/..., which the
 // unstable-binary rule correctly rejects. Fixtures live in the repository so
 // they exercise the stable-path branch.
-const SANDBOX_ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), '.sandbox-deps');
+const SANDBOX_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '.sandbox-deps');
 
 function temporaryDirectory(name) {
   fs.mkdirSync(SANDBOX_ROOT, { recursive: true });

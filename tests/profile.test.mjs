@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   DEFAULT_LOCAL_URL,
@@ -18,7 +19,7 @@ import {
 import { isStrictLoopbackHost, normalizeCredentialedBase } from '../core/statusline/net.mjs';
 import { snapshotConfig } from '../core/statusline/snapshot.mjs';
 
-const repository = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function temporaryDirectory(name) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
@@ -122,17 +123,20 @@ test('profiles round-trip on disk with owner-only permissions', () => {
 });
 
 test('profile path honours explicit override and XDG_CONFIG_HOME', () => {
+  const override = path.join(os.tmpdir(), 'custom.json');
   assert.equal(
-    profilePath({ CC_BOOTSTRAP_PROFILE_FILE: '/tmp/custom.json' }),
-    path.resolve('/tmp/custom.json'),
+    profilePath({ CC_BOOTSTRAP_PROFILE_FILE: override }),
+    path.resolve(override),
   );
+  const xdg = path.join(os.tmpdir(), 'xdg');
   assert.equal(
-    profilePath({ XDG_CONFIG_HOME: '/xdg' }, '/home/me'),
-    path.join('/xdg', 'cc-portable-bootstrap', 'profile.json'),
+    profilePath({ XDG_CONFIG_HOME: xdg }, path.join(os.tmpdir(), 'home')),
+    path.join(xdg, 'cc-portable-bootstrap', 'profile.json'),
   );
+  const home = path.join(os.tmpdir(), 'home');
   assert.equal(
-    profilePath({}, '/home/me'),
-    path.join('/home/me', '.config', 'cc-portable-bootstrap', 'profile.json'),
+    profilePath({}, home),
+    path.join(home, '.config', 'cc-portable-bootstrap', 'profile.json'),
   );
 });
 

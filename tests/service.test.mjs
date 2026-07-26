@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   SERVICE_LABEL,
@@ -15,7 +16,7 @@ import {
   systemdUnitPath,
 } from '../core/service/index.mjs';
 
-const SANDBOX_ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), '.sandbox-service');
+const SANDBOX_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '.sandbox-service');
 
 function temporaryDirectory(name) {
   fs.mkdirSync(SANDBOX_ROOT, { recursive: true });

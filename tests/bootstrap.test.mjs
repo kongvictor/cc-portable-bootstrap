@@ -197,6 +197,20 @@ process.exit(Number(process.env.FAKE_CLAUDE_EXIT || 0));
 `);
 }
 
+// Windows installs claudex.ps1 plus a .cmd shim; POSIX installs one extensionless
+// launcher. Tests assert on whichever this platform is supposed to produce.
+const CLAUDEX_LAUNCHERS = process.platform === 'win32'
+  ? ['claudex.ps1', 'claudex.cmd']
+  : ['claudex'];
+
+function claudexInstalled(claudeDir) {
+  return CLAUDEX_LAUNCHERS.every((name) => fs.existsSync(path.join(claudeDir, 'bin', name)));
+}
+
+function claudexAbsent(claudeDir) {
+  return CLAUDEX_LAUNCHERS.every((name) => !fs.existsSync(path.join(claudeDir, 'bin', name)));
+}
+
 function createSecret(home) {
   const directory = path.join(home, '.secrets');
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -284,7 +298,7 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     const installedProfile = fs.readFileSync(path.join(sandbox.home, '.zshrc'), 'utf8');
     assert.doesNotMatch(installedProfile, /claudex\s*\(\)\s*\{/);
     assert.match(installedProfile, /cc-portable-bootstrap PATH/);
-    assert.ok(fs.existsSync(path.join(claudeDir, 'bin', 'claudex')));
+    assert.ok(claudexInstalled(claudeDir));
 
     // The status line is installed by the same run; there is no second installer.
     const statuslineDir = path.join(claudeDir, 'cc-portable-bootstrap');
@@ -337,7 +351,7 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     assert.equal(restored.status, 0, restored.stderr || restored.stdout);
     assert.equal(fs.readFileSync(path.join(claudeDir, 'CLAUDE.md'), 'utf8'), originalClaudeMd);
     assert.equal(fs.readFileSync(path.join(sandbox.home, '.zshrc'), 'utf8'), originalProfile);
-    assert.equal(fs.existsSync(path.join(claudeDir, 'bin', 'claudex')), false);
+    assert.ok(claudexAbsent(claudeDir));
     assert.equal(stateOf(sandbox).mcp.present, false);
 
     fs.chmodSync(protectedConfig, 0o600);
@@ -521,7 +535,10 @@ test('managed text preserves BOM/CRLF and rejects malformed markers', () => {
   assert.match(profile, new RegExp(PATH_BEGIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
-test('Codex resolver skips cmux shim and selects a stable PATH binary', () => {
+test('Codex resolver skips cmux shim and selects a stable PATH binary', {
+  // Relies on symlinks and extensionless PATH lookup; neither applies on Windows.
+  skip: process.platform === 'win32',
+}, () => {
   const sandbox = fixtureSandbox('resolver');
   try {
     createSecret(sandbox.home);
@@ -688,7 +705,7 @@ test('setup verifies MCP registration and rolls files back when add is a no-op',
     assert.match(result.stderr, /required postcondition/);
     assert.match(result.stderr, /setup rolled back/);
     assert.equal(fs.existsSync(path.join(sandbox.home, '.claude', 'CLAUDE.md')), false);
-    assert.equal(fs.existsSync(path.join(sandbox.home, '.claude', 'bin', 'claudex')), false);
+    assert.ok(claudexAbsent(path.join(sandbox.home, '.claude')));
     assert.equal(stateOf(sandbox).mcp.present, false);
     assert.equal(backupIds(sandbox.home).length, 1);
   } finally {
@@ -861,7 +878,10 @@ test('restore rejects dot backup IDs without leaving the backups directory', () 
   }
 });
 
-test('setup preserves managed symlinks and existing HOME permissions', () => {
+test('setup preserves managed symlinks and existing HOME permissions', {
+  // Symlink creation needs elevation on Windows and POSIX modes do not apply.
+  skip: process.platform === 'win32',
+}, () => {
   const sandbox = fixtureSandbox('symlink-profile');
   try {
     createSecret(sandbox.home);
@@ -953,7 +973,10 @@ function runAsync(command, args, options) {
   });
 }
 
-test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts check output', async () => {
+test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts check output', {
+  // The POSIX launcher is a /bin/sh script; Windows ships claudex.ps1, covered separately.
+  skip: process.platform === 'win32',
+}, async () => {
   const sandbox = fixtureSandbox('claudex');
   const launcher = path.join(sandbox.root, 'claudex');
   const launchRecord = path.join(sandbox.root, 'launch.json');
