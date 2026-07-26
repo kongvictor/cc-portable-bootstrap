@@ -231,6 +231,12 @@ function quotePosix(value) {
 // prints its banner and echoes the status-line JSON instead of rendering it.
 // System32\bash.exe is the WSL launcher, not Git Bash, so it does not count.
 export function hasGitBash(env = process.env) {
+  // Explicit override: set CC_BOOTSTRAP_GIT_BASH to 1 or 0 when detection gets it
+  // wrong for a host, and so tests can pin either branch deterministically.
+  const override = env.CC_BOOTSTRAP_GIT_BASH?.trim();
+  if (override === '1') return true;
+  if (override === '0') return false;
+
   const known = [
     env.ProgramFiles ? path.win32.join(env.ProgramFiles, 'Git', 'bin', 'bash.exe') : null,
     env['ProgramFiles(x86)'] ? path.win32.join(env['ProgramFiles(x86)'], 'Git', 'bin', 'bash.exe') : null,
@@ -320,6 +326,7 @@ export function configureInstallation({
   launcherPath,
   proxyUrl,
   platform = process.platform,
+  env = process.env,
   force = false,
   dryRun = false,
   configureHud = true,
@@ -342,7 +349,7 @@ export function configureInstallation({
     // Read and validate every file while holding the installer lock, before changing either one.
     const settingsDocument = readJsonDocument(settingsPath);
     const hudDocument = configureHud ? readJsonDocument(hudConfigPath) : null;
-    const command = launcherCommand(launcherPath, platform);
+    const command = launcherCommand(launcherPath, platform, env);
     const nextSettings = configuredSettings(
       settingsDocument,
       command,

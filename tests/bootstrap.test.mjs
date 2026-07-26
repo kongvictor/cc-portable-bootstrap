@@ -303,7 +303,9 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     // The status line is installed by the same run; there is no second installer.
     const statuslineDir = path.join(claudeDir, 'cc-portable-bootstrap');
     assert.ok(fs.existsSync(path.join(statuslineDir, 'runtime.mjs')));
-    assert.ok(fs.existsSync(path.join(statuslineDir, 'statusline')));
+    // Windows installs statusline.cmd; POSIX installs the extensionless launcher.
+    const statuslineLauncher = process.platform === 'win32' ? 'statusline.cmd' : 'statusline';
+    assert.ok(fs.existsSync(path.join(statuslineDir, statuslineLauncher)));
     const settings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
     assert.match(settings.statusLine.command, /cc-portable-bootstrap\/statusline/);
     assert.equal(settings.statusLine.refreshInterval, 3);

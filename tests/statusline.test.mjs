@@ -244,14 +244,27 @@ test('generates a lightweight Windows cmd command and keeps PowerShell compatibi
   const powershellPath =
     'C:\\Users\\Example User\\.claude\\cliproxy-usage-statusline\\cliproxy-usage.ps1';
 
+  // Claude Code runs the status line through Git Bash when it is installed, and
+  // Git Bash mangles cmd.exe switches, so the recorded form differs by host.
+  // Both branches are pinned here rather than depending on the test machine.
+  const noGitBash = { CC_BOOTSTRAP_GIT_BASH: '0' };
+  const withGitBash = { CC_BOOTSTRAP_GIT_BASH: '1' };
+
   assert.equal(
-    launcherCommand(cmdPath, 'win32'),
+    launcherCommand(cmdPath, 'win32', noGitBash),
     `cmd.exe /d /s /c ""${cmdPath}""`,
   );
   assert.equal(
-    launcherCommand(powershellPath, 'win32'),
-    `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "${powershellPath}"`,
+    launcherCommand(cmdPath, 'win32', withGitBash),
+    "'/c/Users/Example User/.claude/cliproxy-usage-statusline/cliproxy-usage.cmd'",
   );
+  // A .ps1 launcher is always recorded as a PowerShell invocation.
+  for (const env of [noGitBash, withGitBash]) {
+    assert.equal(
+      launcherCommand(powershellPath, 'win32', env),
+      `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "${powershellPath}"`,
+    );
+  }
 
   const launcherBytes = fs.readFileSync(path.join(repository, 'bin/statusline.cmd'));
   assert.equal(launcherBytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false);
@@ -433,6 +446,8 @@ test('force mode replaces only the foreign statusLine fields it owns', () => {
     claudeDir,
     launcherPath: launcher,
     platform: 'win32',
+    // Pin the non-Git-Bash form so the assertion below is host-independent.
+    env: { CC_BOOTSTRAP_GIT_BASH: '0' },
     force: true,
     configureHud: false,
   });
