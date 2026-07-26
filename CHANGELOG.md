@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.1.1
+
+Bundles the rest of the working set, and makes CI green on every platform. The
+CI work matters beyond the badge: five real defects were only visible on a
+machine unlike this one, and 1.1.0 shipped with all of them.
+
+### Added
+
+- `caveman`, `dmd` and `context7` are now declared dependencies, so a new
+  machine gets the whole working set rather than just the status-line HUD.
+  caveman and dmd are bundled in this repository's marketplace; context7 is
+  installed by its qualified id from the official one.
+- `CC_BOOTSTRAP_GIT_BASH=1|0` overrides Git Bash detection. It exists so both
+  statusLine forms can be tested deterministically, and doubles as an escape
+  hatch if detection is ever wrong on a host.
+
+### Fixed
+
+- `node --test tests/*.test.mjs` never ran on Windows with Node 18: neither
+  Node 18 nor a Windows shell expands globs, so the pattern reached node
+  verbatim. Node 22 expands it internally, which is why only one matrix cell
+  failed. The suite now runs as bare `node --test`.
+- Three test files derived their directory from
+  `new URL(import.meta.url).pathname`, which yields `/D:/a/...` on Windows. The
+  leading slash produced `D:\D:\a\...` and broke ten tests. `fileURLToPath`
+  exists for exactly this.
+- Test fixtures wrote fake `claude`/`codex` binaries as extensionless shell
+  scripts, which Windows cannot execute, failing every bootstrap test there.
+  They are now a Node script plus a `.cmd` shim — the same shape npm produces
+  for a global CLI, so the fixtures exercise the batch-shim path the installer
+  handles in practice.
+- The PowerShell syntax check passed the script path as a trailing argument to
+  `-Command`, which appends it to the command text instead of populating
+  `$args`, so `ParseFile` always received `$null`. This test had never executed
+  here — no PowerShell is installed, so it always skipped.
+- The CRLF guard used `grep -qU $'[^\r]\n'`, but grep strips the line terminator
+  before matching, so the pattern could never fire and correctly-CRLF files were
+  reported as wrong. It now reads bytes.
+- Assertions that assumed POSIX layout now expect `claudex.ps1` plus
+  `claudex.cmd` on Windows, and build paths from `os.tmpdir()` rather than
+  hardcoding `/tmp`. Three tests that genuinely require POSIX mechanics (a
+  `/bin/sh` launcher, symlinks needing elevation, extensionless PATH lookup) are
+  skipped on Windows with a stated reason instead of failing.
+
 ## 1.1.0
 
 First release that actually works on a native Windows host. Everything here was
