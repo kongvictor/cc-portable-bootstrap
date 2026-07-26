@@ -212,6 +212,11 @@ test('recognizes only exact legacy and stable cliproxy status commands', () => {
     isManagedStatusCommand('/cache/cliproxy-usage/0.2.0/statusline/statusline.sh'),
     true,
   );
+  // Git Bash form recorded on Windows: a POSIX path to the .cmd launcher.
+  assert.equal(
+    isManagedStatusCommand("'/c/Users/me/.claude/cc-portable-bootstrap/statusline.cmd'"),
+    true,
+  );
   assert.equal(
     isManagedStatusCommand("'/Users/me/.claude/cliproxy-usage-statusline/cliproxy-usage'"),
     true,
@@ -661,7 +666,6 @@ test('native Windows setup installs cmd and preserves BOM/CRLF stdin through spa
   const viaGitBash = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
   assert.match(viaGitBash.statusLine.command, /^'\/[a-z]\//);
   assert.match(viaGitBash.statusLine.command, /statusline\.cmd'$/);
-  assert.ok(isManagedStatusCommand(viaGitBash.statusLine.command));
   assert.ok(fs.existsSync(cmdLauncher));
   assert.ok(fs.existsSync(powershellLauncher));
 
