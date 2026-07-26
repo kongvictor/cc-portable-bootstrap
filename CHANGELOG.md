@@ -1,6 +1,64 @@
 # Changelog
 
-## 1.0.0 (unreleased)
+## 1.1.0
+
+First release that actually works on a native Windows host. Everything here was
+found by deploying 1.0.0 to real machines rather than by testing on the machine
+it was written on.
+
+### Fixed — native Windows
+
+- npm installs Codex as a `.cmd` shim, which `CreateProcess` cannot launch. Batch
+  shims now go through `cmd.exe` with a verbatim, outer-quoted command line, and
+  command lookup prefers `PATHEXT` candidates over the extensionless POSIX
+  scripts npm installs beside them. Previously `mcp-server` detection always
+  failed and setup reported no stable Codex binary.
+- `setup-windows.ps1` resolved node with `Get-Command`, which returns every match
+  on PATH; with two Node installs the path became an array and the wrapper tried
+  to execute both joined by a space.
+- Windows PowerShell strips embedded double quotes from native-command
+  arguments, so the Node version probe was evaluated as `split(.)` and threw a
+  SyntaxError, failing the 18+ check on a supported runtime.
+- Claude Code runs the status line through Git Bash whenever Git Bash is
+  installed. Git Bash rewrites the `/d` and `/s` switches into filesystem paths,
+  so the recorded `cmd.exe /d /s /c` form started an interactive cmd.exe that
+  printed its banner and echoed the status-line JSON. On Windows the launcher is
+  now recorded in POSIX form when Git Bash is present; hosts without it keep the
+  cmd.exe form. Both are recognised as managed, so upgrading needs no `--force`.
+
+### Fixed — status line never refreshed
+
+- The usage refresh built its endpoint list from `CLIPROXY_URL` alone. Claude
+  Code spawns the status line from the user's shell, and setup deliberately does
+  not pin that variable into `settings.env`, so the list was empty on every run
+  and the quota segments silently froze at whatever the cache held. Nothing
+  surfaced, because a missing snapshot renders as an absent segment, not an
+  error. Endpoints now fall back to the machine profile that setup already
+  writes; an explicit `CLIPROXY_URL` stays authoritative.
+- That fallback duplicated the profile lookup (the status-line runtime is
+  installed flat, without `core/profile.mjs`) and immediately drifted from it:
+  it sorted priority descending instead of ascending, so a tunnelled hub at
+  priority 10 lost to a local fallback at 100, and it compared `activeEndpoint`
+  against each entry's label when the profile stores a URL, so the recorded
+  active endpoint was never preferred. A test now pins both orderings together.
+
+### Fixed — upgrades did not reach deployed machines
+
+- Pulling new code and rerunning setup reported "no bootstrap changes required"
+  and kept running the previous status-line runtime. The launcher path and the
+  statusLine setting do not change between versions, and nothing compared the
+  installed files. setup now compares the installed bytes against the checkout,
+  reports a `stale` state, and reinstalls.
+
+### Changed
+
+- Codex implementation mode documents how long MCP calls behave: calls past two
+  minutes move to a background task (that is not a timeout — check `/tasks`), the
+  wall-clock limit is about 28 hours, and the stdio idle window is disabled via
+  `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=0`. Retrying or opening a new Codex thread
+  would duplicate work that is still running.
+
+## 1.0.0
 
 First release of the merged repository. Supersedes `claude-portable-bootstrap` and
 `cliproxy-usage-statusline`, which are retired.
