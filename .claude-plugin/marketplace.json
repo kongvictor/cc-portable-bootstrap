@@ -16,6 +16,20 @@
       "tags": ["hud", "statusline"]
     },
     {
+      "name": "caveman",
+      "source": { "source": "github", "repo": "JuliusBrussee/caveman" },
+      "description": "Terse response style that keeps technical substance while dropping filler. Bundled so a new machine gets the same working style.",
+      "category": "workflow",
+      "tags": ["style", "output"]
+    },
+    {
+      "name": "dmd",
+      "source": { "source": "github", "repo": "laiso/claude-code-dmd" },
+      "description": "Cursor-style debug mode for Claude Code: NDJSON logs and the dmd CLI. Bundled so debugging works the same on every machine.",
+      "category": "development",
+      "tags": ["debugging", "logs"]
+    },
+    {
       "name": "cc-portable-bootstrap",
       "source": "./",
       "description": "One-command setup of a portable Claude Code agent environment: stable Codex MCP, Codex implementation mode, the claudex GPT launcher, and a statusline showing the real GPT context window plus official Claude/ChatGPT quota.",

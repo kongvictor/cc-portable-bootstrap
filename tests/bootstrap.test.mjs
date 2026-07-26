@@ -48,18 +48,42 @@ function writeExecutable(file, content) {
   fs.chmodSync(file, 0o700);
 }
 
+// Windows cannot execute an extensionless shell script, so the fake binaries are
+// written as a Node script plus a .cmd shim there. That is also what npm produces
+// for a globally installed CLI, so these fixtures exercise the same batch-shim
+// path the installer has to handle in practice.
+const FAKE_SUFFIX = process.platform === 'win32' ? '.cmd' : '';
+
+export function fakeBinaryPath(file) {
+  return `${file}${FAKE_SUFFIX}`;
+}
+
+function writeFakeBinary(file, nodeSource) {
+  if (process.platform !== 'win32') {
+    writeExecutable(file, `#!/usr/bin/env node\n${nodeSource}`);
+    return `${file}`;
+  }
+  const script = `${file}.mjs`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(script, nodeSource, 'utf8');
+  // %* forwards arguments verbatim; @echo off keeps the banner out of stdout.
+  fs.writeFileSync(`${file}.cmd`, `@echo off\r\nnode "%~dp0${path.basename(script)}" %*\r\n`, 'utf8');
+  return `${file}.cmd`;
+}
+
 function createFakeCodex(file) {
-  writeExecutable(file, `#!/bin/sh
-if [ "$1" = "mcp-server" ] && [ "$2" = "--help" ]; then
-  printf '%s\\n' 'Start Codex as an MCP server (stdio)'
-  exit 0
-fi
-exit 2
+  return writeFakeBinary(file, `
+const args = process.argv.slice(2);
+if (args[0] === 'mcp-server' && args[1] === '--help') {
+  console.log('Start Codex as an MCP server (stdio)');
+  process.exit(0);
+}
+process.exit(2);
 `);
 }
 
 function createFakeClaude(file) {
-  writeExecutable(file, `#!/usr/bin/env node
+  return writeFakeBinary(file, `
 import fs from 'node:fs';
 const args = process.argv.slice(2);
 const stateFile = process.env.FAKE_CLAUDE_STATE;
@@ -215,11 +239,11 @@ function backupIds(home) {
 
 function fixtureSandbox(name) {
   const sandbox = makeSandbox(name);
-  sandbox.claude = path.join(sandbox.bin, 'claude');
-  sandbox.codex = path.join(sandbox.bin, 'codex');
   sandbox.state = path.join(sandbox.root, 'fake-claude-state.json');
-  createFakeClaude(sandbox.claude);
-  createFakeCodex(sandbox.codex);
+  // On Windows these come back with a .cmd suffix, so the paths handed to
+  // --claude/--codex must be whatever was actually written.
+  sandbox.claude = createFakeClaude(path.join(sandbox.bin, 'claude'));
+  sandbox.codex = createFakeCodex(path.join(sandbox.bin, 'codex'));
   fs.writeFileSync(sandbox.state, JSON.stringify({ mcp: { present: false }, actions: [] }));
   return sandbox;
 }
@@ -511,9 +535,9 @@ test('Codex resolver skips cmux shim and selects a stable PATH binary', () => {
     const versioned = path.join(versionedDir, 'codex');
     createFakeCodex(temporary);
     createFakeCodex(shim);
-    createFakeCodex(versioned);
+    const versionedBinary = createFakeCodex(versioned);
     fs.mkdirSync(stableDir, { recursive: true });
-    fs.symlinkSync(versioned, stable);
+    fs.symlinkSync(versionedBinary, fakeBinaryPath(stable));
 
     const result = runBootstrap(sandbox, 'setup', ['--no-profile', '--yes'], {
       TMPDIR: tempDir,
@@ -694,8 +718,7 @@ test('setup rollback preserves a concurrently replaced Codex MCP definition', ()
   const sandbox = fixtureSandbox('mcp-concurrent-rollback');
   try {
     createSecret(sandbox.home);
-    const concurrentCodex = path.join(sandbox.root, 'concurrent-codex');
-    createFakeCodex(concurrentCodex);
+    const concurrentCodex = createFakeCodex(path.join(sandbox.root, 'concurrent-codex'));
     const result = runBootstrap(sandbox, 'setup', [
       '--codex', sandbox.codex,
       '--no-profile',
@@ -720,8 +743,7 @@ test('setup never recreates or removes a concurrently deleted different MCP', ()
   const sandbox = fixtureSandbox('mcp-concurrent-delete');
   try {
     createSecret(sandbox.home);
-    const previousCodex = path.join(sandbox.root, 'previous-codex');
-    createFakeCodex(previousCodex);
+    const previousCodex = createFakeCodex(path.join(sandbox.root, 'previous-codex'));
     fs.writeFileSync(sandbox.state, JSON.stringify({
       mcp: {
         present: true,

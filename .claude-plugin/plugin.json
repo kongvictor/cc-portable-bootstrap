@@ -6,7 +6,10 @@
     "name": "Victor"
   },
   "dependencies": [
-    "claude-hud"
+    "claude-hud",
+    "caveman",
+    "dmd",
+    "context7@claude-plugins-official"
   ],
   "commands": [
     "./commands/setup.md"

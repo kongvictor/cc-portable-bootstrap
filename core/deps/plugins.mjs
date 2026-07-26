@@ -5,18 +5,32 @@
 import { plan, run } from './common.mjs';
 
 export const MARKETPLACE = 'kongvictor/cc-portable-bootstrap';
-export const REQUIRED_PLUGINS = Object.freeze(['claude-hud']);
+
+// claude-hud, caveman and dmd are bundled in this repository's marketplace, so a
+// plain name resolves. context7 lives in the official marketplace and is
+// installed by its qualified id.
+export const REQUIRED_PLUGINS = Object.freeze([
+  'claude-hud',
+  'caveman',
+  'dmd',
+  'context7@claude-plugins-official',
+]);
+
+// `claude plugin list` prints the bare plugin name, not the qualified id.
+function pluginName(id) {
+  return String(id).split('@')[0];
+}
 
 export function detectPlugins(claudeBin, { env = process.env } = {}) {
   const result = run(claudeBin, ['plugin', 'list'], { env, timeoutMs: 30_000 });
   if (!result.ok) return { known: false, installed: [], missing: [...REQUIRED_PLUGINS] };
 
   const text = `${result.stdout}\n${result.stderr}`;
-  const installed = REQUIRED_PLUGINS.filter((name) => new RegExp(`\\b${name}\\b`).test(text));
+  const installed = REQUIRED_PLUGINS.filter((id) => new RegExp(`\\b${pluginName(id)}\\b`).test(text));
   return {
     known: true,
     installed,
-    missing: REQUIRED_PLUGINS.filter((name) => !installed.includes(name)),
+    missing: REQUIRED_PLUGINS.filter((id) => !installed.includes(id)),
   };
 }
 
