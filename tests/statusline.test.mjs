@@ -178,11 +178,17 @@ test('restricts management-key transport and makes an explicit URL authoritative
   assert.equal(normalizeManagementBase('https://proxy.example.test'), 'https://proxy.example.test');
   assert.equal(normalizeManagementBase('https://user:pass@example.test'), null);
 
-  const explicit = snapshotConfig({ CLIPROXY_URL: 'http://127.0.0.1:8317' });
+  // Point the profile lookup at a path that cannot exist, so these assertions
+  // describe the code rather than whichever profile this machine happens to have.
+  const noProfile = { CC_BOOTSTRAP_PROFILE_FILE: path.join(os.tmpdir(), 'cc-absent-profile.json') };
+
+  const explicit = snapshotConfig({ ...noProfile, CLIPROXY_URL: 'http://127.0.0.1:8317' });
   assert.deepEqual(explicit.bases, ['http://127.0.0.1:8317']);
-  const unsafe = snapshotConfig({ CLIPROXY_URL: 'http://192.168.1.10:8317' });
+  const unsafe = snapshotConfig({ ...noProfile, CLIPROXY_URL: 'http://192.168.1.10:8317' });
   assert.deepEqual(unsafe.bases, []);
-  assert.deepEqual(snapshotConfig({}).bases, []);
+  // With neither an explicit URL nor a profile there is nowhere safe to send the
+  // management key, so the refresh must not run at all.
+  assert.deepEqual(snapshotConfig(noProfile).bases, []);
 });
 
 test('discovers the newest claude-hud cache entry', () => {
@@ -490,6 +496,10 @@ test('missing CLIPROXY_URL skips refresh but still renders existing snapshots', 
     ...process.env,
     CLAUDE_CONFIG_DIR: claudeDir,
     CLIPROXY_USAGE_DIR: usageDir,
+    // No explicit URL and no profile: there is no endpoint to send the
+    // management key to, so the refresh must stay off. Pointing at an absent
+    // profile keeps this independent of the machine running the test.
+    CC_BOOTSTRAP_PROFILE_FILE: path.join(root, 'absent-profile.json'),
     COLUMNS: '120',
   };
   delete env.CLIPROXY_URL;

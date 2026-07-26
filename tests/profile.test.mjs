@@ -16,6 +16,7 @@ import {
   writeProfile,
 } from '../core/profile.mjs';
 import { isStrictLoopbackHost, normalizeCredentialedBase } from '../core/statusline/net.mjs';
+import { snapshotConfig } from '../core/statusline/snapshot.mjs';
 
 const repository = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
@@ -185,6 +186,40 @@ test('detection never probes without a key, so no endpoint is offered one', asyn
   assert.equal(result.reason, 'missing-api-key');
   assert.equal(result.endpoint, null);
   assert.equal(probes, 0);
+});
+
+test('the status line resolves endpoints exactly like the profile module', () => {
+  // snapshot.mjs duplicates this lookup because the status-line runtime is
+  // installed flat, without core/profile.mjs. The copy has already drifted once
+  // (descending priority, and matching activeEndpoint against label instead of
+  // URL), so the two orderings are pinned against each other here.
+  const root = temporaryDirectory('profile-parity');
+  const file = path.join(root, 'profile.json');
+  const hub = 'http://127.0.0.1:19001';
+  const local = DEFAULT_LOCAL_URL;
+
+  const profile = writeProfile(file, profileWith([
+    { label: 'local', url: local, priority: 100 },
+    { label: 'hub', url: hub, priority: 10 },
+  ]));
+  const env = { CC_BOOTSTRAP_PROFILE_FILE: file };
+
+  // Lower priority first, in both implementations.
+  assert.deepEqual(orderedEndpoints(profile).map((e) => e.url), [hub, local]);
+  assert.deepEqual(snapshotConfig(env).bases, [hub, local]);
+
+  // activeEndpoint is a URL and must be tried first, whatever its priority.
+  writeProfile(file, { ...profile, activeEndpoint: local });
+  assert.deepEqual(snapshotConfig(env).bases, [local, hub]);
+
+  // An explicit CLIPROXY_URL still overrides the profile entirely.
+  assert.deepEqual(
+    snapshotConfig({ ...env, CLIPROXY_URL: hub }).bases,
+    [hub],
+  );
+
+  // No profile and no variable means no credentialed request at all.
+  assert.deepEqual(snapshotConfig({ CC_BOOTSTRAP_PROFILE_FILE: path.join(root, 'absent.json') }).bases, []);
 });
 
 test('role description follows the two independent role flags', () => {

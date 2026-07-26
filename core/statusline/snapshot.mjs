@@ -41,11 +41,23 @@ function profileEndpoints(env) {
     return [];
   }
   if (!Array.isArray(parsed?.endpoints)) return [];
-  const byPriority = [...parsed.endpoints].sort(
-    (left, right) => Number(right?.priority || 0) - Number(left?.priority || 0),
-  );
-  const active = byPriority.filter((entry) => entry?.label === parsed.activeEndpoint);
-  return [...active, ...byPriority].map((entry) => entry?.url).filter(Boolean);
+
+  // Ascending priority, matching orderedEndpoints() in core/profile.mjs: a lower
+  // number is preferred, so a tunnelled hub at 10 wins over a local fallback at 100.
+  const byPriority = [...parsed.endpoints].sort((left, right) => {
+    const leftPriority = Number(left?.priority ?? 100);
+    const rightPriority = Number(right?.priority ?? 100);
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return String(left?.label || '').localeCompare(String(right?.label || ''));
+  });
+
+  // activeEndpoint stores a URL, not a label — see validateProfile().
+  const urls = byPriority.map((entry) => entry?.url).filter(Boolean);
+  const active = parsed.activeEndpoint;
+  const ordered = active && urls.includes(active)
+    ? [active, ...urls.filter((url) => url !== active)]
+    : urls;
+  return [...new Set(ordered)];
 }
 
 export function snapshotConfig(env = process.env) {
