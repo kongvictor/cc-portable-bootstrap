@@ -93,7 +93,15 @@ function Set-PathEntryPresence {
 function New-CoreArguments {
     param([string] $CoreAction, [bool] $IncludeExternalPathChange)
 
-    $arguments = @($bootstrap, $CoreAction, '--no-profile', '--home', $homeDir, '--config-dir', $configDirPath)
+    # Forward --config-dir only when the caller actually chose one. The core
+    # treats the flag as "the user picked this directory" and pins
+    # CLAUDE_CONFIG_DIR for every `claude mcp` call, which sends the
+    # registration to <configDir>/.claude.json instead of the real ~/.claude.json
+    # — a shadow entry that check reports as healthy but Claude Code never loads.
+    $arguments = @($bootstrap, $CoreAction, '--no-profile', '--home', $homeDir)
+    if (-not [string]::IsNullOrWhiteSpace($ConfigDir)) {
+        $arguments += @('--config-dir', $configDirPath)
+    }
     if (-not [string]::IsNullOrWhiteSpace($Backup)) { $arguments += @('--backup', $Backup) }
     if (-not [string]::IsNullOrWhiteSpace($Claude)) { $arguments += @('--claude', $Claude) }
     if (-not [string]::IsNullOrWhiteSpace($Codex)) { $arguments += @('--codex', $Codex) }
