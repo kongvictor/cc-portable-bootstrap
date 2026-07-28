@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.2
+
+A single Windows defect, found the only way it could be: Claude Code could not
+see a Codex MCP server that `check` had been reporting as healthy for days.
+
+### Fixed
+
+- The Windows wrapper forwarded `--config-dir` on every run, passing its own
+  computed default as if the user had chosen it. The core reads that flag as an
+  explicit choice and pins `CLAUDE_CONFIG_DIR` for each `claude mcp` call, which
+  is the failure `sanitizedChildEnv` documents: the registration lands in
+  `<configDir>/.claude.json` instead of the real `~/.claude.json`. Both sides
+  agreed with themselves and disagreed with each other, so `check` reported a
+  healthy user-scope registration for a server Claude Code never loaded. The
+  flag is now forwarded only when `-ConfigDir` is supplied. `setup-posix.sh`
+  never passed it, so only Windows was affected.
+
 ## 1.1.1
 
 Bundles the rest of the working set, and makes CI green on every platform. The

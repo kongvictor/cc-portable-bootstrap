@@ -1078,7 +1078,14 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
   assert.match(setupText, /--external-change.*Windows User PATH/s);
   assert.match(setupText, /windows-user-path\.json/);
   assert.match(setupText, /\[needs-setup\] Windows User PATH/);
-  assert.match(setupText, /'--home', \$homeDir, '--config-dir', \$configDirPath/);
+  assert.match(setupText, /'--home', \$homeDir\)/);
+  // --config-dir must stay conditional: forwarding the computed default makes the
+  // core treat it as an explicit choice and pin CLAUDE_CONFIG_DIR, which sends the
+  // MCP registration to <configDir>/.claude.json instead of the real one.
+  assert.match(
+    setupText,
+    /IsNullOrWhiteSpace\(\$ConfigDir\)\)\s*\{\s*\$arguments \+= @\('--config-dir', \$configDirPath\)/,
+  );
   assert.doesNotMatch(setupText, /Git Bash|\bbash\b/i);
 
   const planSkip = setupText.indexOf('Windows User PATH: restore skipped by request');
