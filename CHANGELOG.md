@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.4
+
+Brings the same reasoning tiers to the Claude-on-GPT launcher that 1.1.3 gave
+Codex delegation, and makes `xhigh` the launcher's default.
+
+### Added
+
+- `claudex --effort high|xhigh|max|ultra` selects the reasoning tier through
+  the model-name parentheses suffix (`gpt-5.6-sol(<effort>)[1m]`): the proxy
+  strips the suffix and writes `reasoning.effort` upstream while Claude Code
+  strips the trailing `[1m]` client-side, so the 1M context budget is kept.
+  Verified end-to-end against a live proxy; combines freely with `--fast`.
+- Setup installs terminal shortcuts on both platforms: `claudexhigh`,
+  `claudexxhigh`, `claudexmax`, `claudexultra`, each with a `fast`-suffixed
+  variant, plus `claudexfast` (default tier + Fast). Uninstall removes them.
+- The managed CLAUDE.md block documents eight case-insensitive `claudex*`
+  trigger words that delegate a task to a headless Claude-on-GPT run at the
+  matching tier, mirroring the CodexDev triggers.
+
+### Changed
+
+- Bare `claudex` now defaults to `xhigh` reasoning instead of the upstream
+  default; `claudex --check` reports the selected tier and composed model.
+
 ## 1.1.3
 
 Adds explicit Codex performance tiers to both delegation mode and the
