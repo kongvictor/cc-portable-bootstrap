@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.3
+
+Adds explicit Codex performance tiers to both delegation mode and the
+Claude-on-GPT launcher, and makes the safer Codex MCP policy the installed
+default.
+
+### Added
+
+- Six implementation-mode triggers now cover `xhigh`, `max`, and `ultra`
+  reasoning, each with a `Fast` variant that selects the Codex Fast service
+  tier without changing reasoning depth.
+- `claudex --fast` preserves the configured GPT model and any existing
+  `CLAUDE_CODE_EXTRA_BODY` object while injecting `speed: "fast"`. Both Windows
+  and POSIX launchers consume the flag themselves, validate malformed extra
+  body configuration, and expose `claudex --fast --check`.
+- Launcher regression coverage now verifies argument filtering, request-body
+  merging, secret redaction, and malformed-configuration failure on Windows
+  and POSIX.
+
+### Changed
+
+- New Codex MCP registrations use
+  `codex --sandbox workspace-write --ask-for-approval never mcp-server`.
+
 ## 1.1.2
 
 A single Windows defect, found the only way it could be: Claude Code could not
