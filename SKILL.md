@@ -16,6 +16,7 @@ allowed-tools: Bash, Read, Skill, AskUserQuestion
 - launcher 启动 Claude 前必须移除继承的 `ANTHROPIC_API_KEY`，只注入 `ANTHROPIC_AUTH_TOKEN`，避免 Claude Code 2.1.220+ 同时发送两种认证 header。
 - 永远不要读取或同步整份 `~/.claude.json`。Codex MCP 只通过 `claude mcp get/add` 自动检查和注册，并且 scope 必须是 `user`。禁止自动 remove/replace；CLI 无 compare-and-swap，需要删除时必须保留当前定义并要求用户手工处理。
 - 不允许 `danger-full-access`；Codex 实现模式只能使用 `read-only` 或 `workspace-write`，`approval-policy` 固定为 `never`。
+- 用户说“使用 CodexFast 实现模式”时仅当前任务启用，说“进入 CodexFast 实现模式”时持续启用，直到用户说“退出 CodexFast 实现模式”。它沿用 Codex 实现模式的模型、effort、sandbox、`approval-policy` 和 `threadId` 复用规则，唯一区别是每次 `mcp__codex__codex` 调用都在 `config` 中额外传 `"service_tier": "fast"`；普通模式不传 `service_tier`。这是 Codex 原生 fast tier（请求值 `priority`），约 1.5× 提速且推理深度不变；ChatGPT 登录下 credit 约为 Standard 的 2.5×。
 - statusline 由本仓库 `core/statusline/install.mjs` 安装。不要手改 `settings.json` 的 `statusLine`，也不要复制 renderer 或 snapshot 实现。
 - 不初始化 Git，不 commit，不 push。
 

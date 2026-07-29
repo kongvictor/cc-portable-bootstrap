@@ -292,6 +292,9 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     assert.match(installedClaudeMd, /read-only/);
     assert.match(installedClaudeMd, /workspace-write/);
     assert.match(installedClaudeMd, /禁止 `danger-full-access`/);
+    assert.match(installedClaudeMd, /使用 CodexFast 实现模式/);
+    assert.match(installedClaudeMd, /"service_tier": "fast"/);
+    assert.match(installedClaudeMd, /普通 Codex 实现模式不传 `service_tier`/);
     assert.match(installedClaudeMd, /# Following section/);
     assert.doesNotMatch(installedClaudeMd, /- old rule/);
 
