@@ -8,9 +8,26 @@ KEY_FILE=${CLAUDEX_API_KEY_FILE:-"$HOME/.secrets/cliproxy_apikey"}
 PREFERRED_URL=${CLIPROXY_URL:-http://127.0.0.1:8317}
 FALLBACK_URL=${CLAUDEX_FALLBACK_URL:-http://127.0.0.1:8317}
 CHECK_ONLY=0
+FAST_MODE=0
 
-for arg in "$@"; do
-  if [ "$arg" = "--check" ]; then CHECK_ONLY=1; fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check)
+      CHECK_ONLY=1
+      shift
+      ;;
+    --fast)
+      FAST_MODE=1
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
 done
 
 if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
@@ -81,11 +98,39 @@ if ! command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
+fast_extra_body=''
+if [ "$FAST_MODE" -eq 1 ]; then
+  if ! fast_extra_body=$("$NODE_BIN" <<'NODE'
+let body = {};
+const existing = process.env.CLAUDE_CODE_EXTRA_BODY;
+if (existing) {
+  try {
+    const parsed = JSON.parse(existing);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) process.exit(1);
+    body = parsed;
+  } catch {
+    process.exit(1);
+  }
+}
+body.speed = 'fast';
+process.stdout.write(JSON.stringify(body));
+NODE
+  ); then
+    printf '%s\n' 'claudex: CLAUDE_CODE_EXTRA_BODY must be a JSON object when --fast is used' >&2
+    exit 1
+  fi
+fi
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
   printf '%s\n' 'claudex check: secret file present and non-empty (value hidden)'
   printf 'claudex check: %s endpoint returned HTTP 2xx\n' "$selected_label"
   printf '%s\n' 'claudex check: Claude executable found'
   printf '%s\n' 'claudex check: inherited ANTHROPIC_API_KEY will be removed before launch'
+  if [ "$FAST_MODE" -eq 1 ]; then
+    printf '%s\n' 'claudex check: Fast mode enabled (request speed=fast)'
+  else
+    printf '%s\n' 'claudex check: Fast mode available via --fast'
+  fi
   exit 0
 fi
 
@@ -100,6 +145,9 @@ NODE
 unset ANTHROPIC_API_KEY
 export ANTHROPIC_BASE_URL=$selected_url
 export ANTHROPIC_AUTH_TOKEN=$api_key
+if [ "$FAST_MODE" -eq 1 ]; then
+  export CLAUDE_CODE_EXTRA_BODY=$fast_extra_body
+fi
 export CLAUDE_CODE_SUBAGENT_MODEL='gpt-5.6-sol'
 export CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY='3'
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW='360000'

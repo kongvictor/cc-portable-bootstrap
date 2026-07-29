@@ -192,6 +192,7 @@ if (launchFile) {
     concurrency: process.env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY,
     compactWindow: process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     toolSearch: process.env.ENABLE_TOOL_SEARCH,
+    extraBody: process.env.CLAUDE_CODE_EXTRA_BODY,
     inheritedMarker: process.env.CURRENT_ENV_MARKER,
   }, null, 2));
 }
@@ -1025,12 +1026,14 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
       FAKE_CLAUDE_LAUNCH: launchRecord,
       CURRENT_ENV_MARKER: 'preserved',
       ANTHROPIC_API_KEY: 'inherited-key-that-must-not-reach-claude',
+      CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"test"},"speed":"standard"}',
     };
 
     const check = await runAsync(launcher, ['--check'], { env: commonEnv });
     assert.equal(check.status, 0, check.stderr || check.stdout);
     assert.match(check.stdout, /localhost fallback endpoint returned HTTP 2xx/);
     assert.match(check.stdout, /ANTHROPIC_API_KEY will be removed/);
+    assert.match(check.stdout, /Fast mode available via --fast/);
     assert.doesNotMatch(`${check.stdout}${check.stderr}`, new RegExp(SECRET_SENTINEL));
     assert.equal(fs.existsSync(launchRecord), false);
 
@@ -1046,7 +1049,34 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     assert.equal(record.concurrency, '3');
     assert.equal(record.compactWindow, '360000');
     assert.equal(record.toolSearch, 'false');
+    assert.equal(record.extraBody, commonEnv.CLAUDE_CODE_EXTRA_BODY);
     assert.equal(record.inheritedMarker, 'preserved');
+
+    const fastLaunch = await runAsync(launcher, ['--fast', '--print', 'hello fast'], { env: commonEnv });
+    assert.equal(fastLaunch.status, 0, fastLaunch.stderr || fastLaunch.stdout);
+    const fastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(fastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol[1m]']);
+    assert.deepEqual(fastRecord.args.slice(4), ['--print', 'hello fast']);
+    assert.deepEqual(JSON.parse(fastRecord.extraBody), {
+      metadata: { source: 'test' },
+      speed: 'fast',
+    });
+
+    const fastCheck = await runAsync(launcher, ['--fast', '--check'], { env: commonEnv });
+    assert.equal(fastCheck.status, 0, fastCheck.stderr || fastCheck.stdout);
+    assert.match(fastCheck.stdout, /Fast mode enabled \(request speed=fast\)/);
+
+    const malformedFast = await runAsync(launcher, ['--fast', '--print', 'must not launch'], {
+      env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: '[]' },
+    });
+    assert.equal(malformedFast.status, 1);
+    assert.match(malformedFast.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object/);
+
+    const malformedFastCheck = await runAsync(launcher, ['--fast', '--check'], {
+      env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: 'not-json' },
+    });
+    assert.equal(malformedFastCheck.status, 1);
+    assert.match(malformedFastCheck.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object/);
     assert.ok(authChecks >= 4);
 
     const failedPreferred = await startServer(401);
@@ -1073,6 +1103,81 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
   }
 });
 
+test('Windows claudex Fast mode merges extra body without forwarding launcher flags', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const sandbox = fixtureSandbox('claudex-windows-fast');
+  const launchRecord = path.join(sandbox.root, 'launch.json');
+  const keyFile = path.join(sandbox.home, '.secrets', 'cliproxy_apikey');
+  const powershell = path.join(
+    process.env.SystemRoot || 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  );
+  createSecret(sandbox.home);
+
+  const endpoint = await startServer(204, (request) => {
+    assert.equal(request.headers.authorization, `Bearer ${SECRET_SENTINEL}`);
+  });
+  const commonEnv = {
+    ...process.env,
+    CLAUDEX_API_KEY_FILE: keyFile,
+    CLIPROXY_URL: endpoint.url,
+    CLAUDEX_FALLBACK_URL: endpoint.url,
+    CLAUDEX_CLAUDE_BIN: sandbox.claude,
+    FAKE_CLAUDE_STATE: sandbox.state,
+    FAKE_CLAUDE_LAUNCH: launchRecord,
+    ANTHROPIC_API_KEY: 'inherited-key-that-must-not-reach-claude',
+    CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"test"},"speed":"standard"}',
+  };
+  const launcherArgs = [
+    '-NoLogo',
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    path.join(ROOT_DIR, 'templates', 'claudex.ps1'),
+  ];
+
+  try {
+    const launched = await runAsync(
+      powershell,
+      [...launcherArgs, '--fast', '--print', 'hello fast'],
+      { env: commonEnv },
+    );
+    assert.equal(launched.status, 0, launched.stderr || launched.stdout);
+    const record = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol[1m]']);
+    assert.deepEqual(record.args.slice(4), ['--print', 'hello fast']);
+    assert.equal(record.apiKeyPresent, false);
+    assert.deepEqual(JSON.parse(record.extraBody), {
+      metadata: { source: 'test' },
+      speed: 'fast',
+    });
+
+    const check = await runAsync(
+      powershell,
+      [...launcherArgs, '--fast', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(check.status, 0, check.stderr || check.stdout);
+    assert.match(check.stdout, /Fast mode enabled \(request speed=fast\)/);
+
+    const malformed = await runAsync(
+      powershell,
+      [...launcherArgs, '--fast', '--check'],
+      { env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: '[]' } },
+    );
+    assert.equal(malformed.status, 1);
+    assert.match(malformed.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object/);
+  } finally {
+    await endpoint.close();
+    cleanupSandbox(sandbox);
+  }
+});
+
 test('Windows launchers are native PowerShell/CMD and parse when pwsh is available', (t) => {
   const psLauncher = path.join(ROOT_DIR, 'templates', 'claudex.ps1');
   const psSetup = path.join(ROOT_DIR, 'scripts', 'setup-windows.ps1');
@@ -1085,6 +1190,10 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
   assert.match(psText, /ANTHROPIC_API_KEY.*\$null/s);
   assert.match(psText, /ANTHROPIC_API_KEY will be removed/);
   assert.match(psText, /gpt-5\.6-sol\[1m\]/);
+  assert.match(psText, /\$argument -eq '--fast'/);
+  assert.match(psText, /CLAUDE_CODE_EXTRA_BODY/);
+  assert.match(psText, /\$body\['speed'\] = 'fast'/);
+  assert.match(psText, /Fast mode enabled \(request speed=fast\)/);
   assert.doesNotMatch(psText, /Git Bash|\bbash\b/i);
   assert.match(cmdLauncher, /powershell\.exe/i);
   assert.match(setupText, /SetEnvironmentVariable\('Path'.*'User'\)/s);
