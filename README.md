@@ -5,8 +5,8 @@ Portable, cross-platform setup for my Claude Code agent environment. One reposit
 One `setup` provisions the whole environment:
 
 1. **Dependencies** — installs the Codex CLI and, when this host needs one, [cliproxyapi](https://github.com/router-for-me/CLIProxyAPI), plus the required Claude Code plugins.
-2. **Codex MCP** — registers a stable Codex binary as a user-scope MCP server so Claude can delegate implementation to Codex.
-3. **Working modes** — installs the *Claude orchestrates / Codex implements* mode into your user `CLAUDE.md` as an idempotent managed block.
+2. **Codex MCP** — registers a stable Codex binary as a user-scope MCP server using `codex --sandbox workspace-write --ask-for-approval never mcp-server`, so Claude can delegate implementation to Codex with safe defaults.
+3. **Working modes** — installs six *Claude orchestrates / Codex implements* triggers into your user `CLAUDE.md`: `CodexDev`, `CodexDevMax`, and `CodexDevUltra` select `xhigh`, `max`, and `ultra` reasoning; each also has a `Fast` suffix variant.
 4. **`claudex`** — a launcher that runs Claude Code against GPT models through a local or tunnelled proxy, with a fail-closed health check.
 5. **Statusline** — a Node runtime layered on [claude-hud](https://github.com/jarrodwatts/claude-hud) that rescales GPT/Codex context to its real window, always shows input/cache tokens, and appends official Claude/ChatGPT quota.
 6. **Autostart** — keeps a local proxy running across reboots (launchd / systemd --user / a logon scheduled task on Windows).

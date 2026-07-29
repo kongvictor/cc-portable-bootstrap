@@ -46,6 +46,14 @@ const LEGACY_PATH_MARKERS = [{
 }];
 const CODEX_HEADING = '# Claude 调度 + Codex 实现模式';
 const SECRET_BASENAME = 'cliproxy_apikey';
+const CODEX_MCP_ARGS = Object.freeze([
+  '--sandbox',
+  'workspace-write',
+  '--ask-for-approval',
+  'never',
+  'mcp-server',
+]);
+const LEGACY_CODEX_MCP_ARGS = Object.freeze(['mcp-server']);
 
 function usage() {
   return `${PRODUCT} ${VERSION}
@@ -332,7 +340,7 @@ function unstablePathReason(candidate) {
 }
 
 function validateCodexCapability(candidate, home) {
-  const result = spawnExecutableSync(candidate, ['mcp-server', '--help'], {
+  const result = spawnExecutableSync(candidate, [...CODEX_MCP_ARGS, '--help'], {
     encoding: 'utf8',
     env: sanitizedChildEnv(home),
     timeout: 5000,
@@ -486,7 +494,7 @@ function standardMcpShape(codexBin) {
     scope: 'user',
     type: 'stdio',
     command: codexBin,
-    args: ['mcp-server'],
+    args: [...CODEX_MCP_ARGS],
     hasEnvironment: false,
   };
 }
@@ -504,6 +512,14 @@ function mcpDefinitionsEqual(left, right) {
     && leftArgs.length === rightArgs.length
     && leftArgs.every((value, index) => value === rightArgs[index])
     && Boolean(left.hasEnvironment) === Boolean(right.hasEnvironment);
+}
+
+function codexMcpArgsAreKnownSafe(args) {
+  if (!Array.isArray(args)) return false;
+  return [CODEX_MCP_ARGS, LEGACY_CODEX_MCP_ARGS].some((known) => (
+    args.length === known.length
+    && args.every((value, index) => value === known[index])
+  ));
 }
 
 function mcpMatches(current, codexBin) {
@@ -528,7 +544,7 @@ function mcpReplacementIssue(current) {
   if (current.hasEnvironment) return 'the Codex MCP contains environment entries';
   if ((current.type || '').toLowerCase() !== 'stdio') return 'the Codex MCP is not stdio';
   if (!current.command) return 'the Codex MCP command is missing';
-  if (current.args.length !== 1 || current.args[0] !== 'mcp-server') {
+  if (!codexMcpArgsAreKnownSafe(current.args)) {
     return 'the Codex MCP has nonstandard arguments that may contain sensitive values';
   }
   return null;
@@ -1162,7 +1178,7 @@ function withMcpOperationLock(options, callback) {
   }
 }
 
-function addCodexMcp(claudeBin, codexBin, home, args = ['mcp-server'], configDir = null) {
+function addCodexMcp(claudeBin, codexBin, home, args = CODEX_MCP_ARGS, configDir = null) {
   return runClaudeMcp(
     claudeBin,
     ['add', '--scope', 'user', '--transport', 'stdio', 'codex', '--', codexBin, ...args],
@@ -1213,7 +1229,7 @@ function applyMcpDesired(context, options, mutation) {
       context.claudeBin,
       context.codexBin,
       options.home,
-      ['mcp-server'],
+      CODEX_MCP_ARGS,
       options.explicitConfigDir,
       standardMcpShape(context.codexBin),
       mutation,
@@ -1665,6 +1681,7 @@ if (isMain) {
 }
 
 export {
+  CODEX_MCP_ARGS,
   CODEX_BEGIN,
   CODEX_END,
   PATH_BEGIN,

@@ -7,6 +7,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
+  CODEX_MCP_ARGS,
   CODEX_BEGIN,
   CODEX_END,
   PATH_BEGIN,
@@ -74,7 +75,8 @@ function writeFakeBinary(file, nodeSource) {
 function createFakeCodex(file) {
   return writeFakeBinary(file, `
 const args = process.argv.slice(2);
-if (args[0] === 'mcp-server' && args[1] === '--help') {
+const expectedHelpArgs = ${JSON.stringify([...CODEX_MCP_ARGS, '--help'])};
+if (JSON.stringify(args) === JSON.stringify(expectedHelpArgs)) {
   console.log('Start Codex as an MCP server (stdio)');
   process.exit(0);
 }
@@ -138,7 +140,7 @@ if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'codex') {
       scope: 'User config (available in all your projects)',
       type: 'stdio',
       command: process.env.FAKE_MCP_CONCURRENT_COMMAND,
-      args: ['mcp-server'],
+      args: ${JSON.stringify([...CODEX_MCP_ARGS])},
       hasEnvironment: false,
     };
     writeState(state);
@@ -292,10 +294,16 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     assert.match(installedClaudeMd, /read-only/);
     assert.match(installedClaudeMd, /workspace-write/);
     assert.match(installedClaudeMd, /禁止 `danger-full-access`/);
-    assert.match(installedClaudeMd, /触发词：`CodexDev`/);
-    assert.match(installedClaudeMd, /`CodexDevFast`/);
+    assert.match(installedClaudeMd, /按最长的完整关键词匹配/);
+    assert.match(installedClaudeMd, /`CodexDev`：`config\.model_reasoning_effort` 为 `xhigh`/);
+    assert.match(installedClaudeMd, /`CodexDevMax`：`config\.model_reasoning_effort` 为 `max`/);
+    assert.match(installedClaudeMd, /`CodexDevUltra`：`config\.model_reasoning_effort` 为 `ultra`/);
+    assert.match(installedClaudeMd, /`CodexDevFast`：effort 为 `xhigh`/);
+    assert.match(installedClaudeMd, /`CodexDevMaxFast`：effort 为 `max`/);
+    assert.match(installedClaudeMd, /`CodexDevUltraFast`：effort 为 `ultra`/);
+    assert.match(installedClaudeMd, /codex --sandbox workspace-write --ask-for-approval never mcp-server/);
     assert.match(installedClaudeMd, /"service_tier": "fast"/);
-    assert.match(installedClaudeMd, /普通 CodexDev 不传 `service_tier`/);
+    assert.match(installedClaudeMd, /三个非 Fast 触发词不得传 `service_tier`/);
     assert.match(installedClaudeMd, /# Following section/);
     assert.doesNotMatch(installedClaudeMd, /- old rule/);
 
@@ -317,7 +325,7 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     const fakeState = stateOf(sandbox);
     assert.equal(fakeState.mcp.present, true);
     assert.equal(fs.realpathSync(fakeState.mcp.command), fs.realpathSync(sandbox.codex));
-    assert.deepEqual(fakeState.mcp.args, ['mcp-server']);
+    assert.deepEqual(fakeState.mcp.args, CODEX_MCP_ARGS);
     const addAction = fakeState.actions.find((action) => action.type === 'add');
     assert.equal(addAction.configDir, path.join(sandbox.home, '.claude'));
 
@@ -395,7 +403,7 @@ test('the Claude CLI is not told a config dir the user did not choose', () => {
     createSecret(sandbox.home);
     // Pre-register the MCP the way a real machine would have it.
     fs.writeFileSync(sandbox.state, JSON.stringify({
-      mcp: { present: true, command: sandbox.codex, args: ['mcp-server'] },
+      mcp: { present: true, command: sandbox.codex, args: [...CODEX_MCP_ARGS] },
       actions: [],
     }, null, 2));
 
@@ -530,8 +538,9 @@ test('managed text preserves BOM/CRLF and rejects malformed markers', () => {
     /Malformed PATH managed block/,
   );
 
-  const noEnvironment = parseMcpGet('codex:\n  Scope: User config\n  Type: stdio\n  Command: /bin/codex\n  Args: mcp-server\n  Environment:\n  Timeout: 30000ms\n');
+  const noEnvironment = parseMcpGet('codex:\n  Scope: User config\n  Type: stdio\n  Command: /bin/codex\n  Args: --sandbox workspace-write --ask-for-approval never mcp-server\n  Environment:\n  Timeout: 30000ms\n');
   assert.equal(noEnvironment.hasEnvironment, false);
+  assert.deepEqual(noEnvironment.args, CODEX_MCP_ARGS);
   const inlineEnvironment = parseMcpGet('codex:\n  Scope: User config\n  Type: stdio\n  Command: /bin/codex\n  Args: mcp-server\n  Environment: TOKEN=hidden\n');
   assert.equal(inlineEnvironment.hasEnvironment, true);
 
