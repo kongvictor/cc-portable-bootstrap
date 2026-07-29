@@ -80,15 +80,26 @@ $fallbackUrl = Get-EnvOrDefault 'CLAUDEX_FALLBACK_URL' 'http://127.0.0.1:8317'
 $claudeBin = Get-EnvOrDefault 'CLAUDEX_CLAUDE_BIN' 'claude'
 $checkOnly = $false
 $fastMode = $false
+$effort = 'xhigh'
+$expectEffortValue = $false
 $parseLauncherOptions = $true
 [string[]] $claudeArgs = @()
 foreach ($argument in @($ForwardArgs)) {
+    if ($parseLauncherOptions -and $expectEffortValue) {
+        $effort = $argument
+        $expectEffortValue = $false
+        continue
+    }
     if ($parseLauncherOptions -and $argument -eq '--check') {
         $checkOnly = $true
         continue
     }
     if ($parseLauncherOptions -and $argument -eq '--fast') {
         $fastMode = $true
+        continue
+    }
+    if ($parseLauncherOptions -and $argument -eq '--effort') {
+        $expectEffortValue = $true
         continue
     }
     if ($parseLauncherOptions -and $argument -eq '--') {
@@ -98,6 +109,21 @@ foreach ($argument in @($ForwardArgs)) {
     $parseLauncherOptions = $false
     $claudeArgs += $argument
 }
+
+if ($expectEffortValue) {
+    [Console]::Error.WriteLine('claudex: --effort requires a value (high|xhigh|max|ultra)')
+    exit 1
+}
+if ($effort -notin @('high', 'xhigh', 'max', 'ultra')) {
+    [Console]::Error.WriteLine("claudex: invalid --effort value $effort (expected high|xhigh|max|ultra)")
+    exit 1
+}
+
+# The proxy strips the "(effort)" suffix and writes reasoning.effort upstream;
+# Claude Code strips the trailing "[1m]" client-side before sending, so the
+# combined form keeps the 1M context budget AND selects the reasoning tier.
+$mainModel = "gpt-5.6-sol($effort)[1m]"
+$subagentModel = "gpt-5.6-sol($effort)"
 
 if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf)) {
     [Console]::Error.WriteLine('claudex: secret file is missing or empty; create ~/.secrets/cliproxy_apikey yourself')
@@ -153,6 +179,7 @@ if ($checkOnly) {
     else {
         [Console]::Out.WriteLine('claudex check: Fast mode available via --fast')
     }
+    [Console]::Out.WriteLine("claudex check: reasoning effort=$effort (model $mainModel)")
     exit 0
 }
 
@@ -178,12 +205,12 @@ try {
     if ($fastMode) {
         $env:CLAUDE_CODE_EXTRA_BODY = $fastExtraBody
     }
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'gpt-5.6-sol'
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = $subagentModel
     $env:CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = '3'
     $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '360000'
     $env:ENABLE_TOOL_SEARCH = 'false'
 
-    & $claudeCommand.Path '--permission-mode' 'auto' '--model' 'gpt-5.6-sol[1m]' @claudeArgs
+    & $claudeCommand.Path '--permission-mode' 'auto' '--model' $mainModel @claudeArgs
     $exitCode = $LASTEXITCODE
 }
 finally {

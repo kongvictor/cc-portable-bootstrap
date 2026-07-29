@@ -730,6 +730,19 @@ function readRegularManagedFile(file, options) {
   }
 }
 
+// Terminal shortcuts: claudex<tier>[fast] plus claudexfast. Bare claudex
+// already defaults to xhigh without Fast, so no claudexxhigh-only alias is
+// strictly needed, but it is generated anyway so every documented trigger
+// word has a matching command.
+function claudexShortcuts() {
+  const shortcuts = [{ name: 'claudexfast', args: ['--fast'] }];
+  for (const tier of ['high', 'xhigh', 'max', 'ultra']) {
+    shortcuts.push({ name: `claudex${tier}`, args: ['--effort', tier] });
+    shortcuts.push({ name: `claudex${tier}fast`, args: ['--effort', tier, '--fast'] });
+  }
+  return shortcuts;
+}
+
 function desiredFiles(options) {
   const template = fs.readFileSync(
     path.join(ROOT_DIR, 'templates', 'modes', 'codex-implementation.md'),
@@ -760,6 +773,16 @@ function desiredFiles(options) {
         label: 'Windows claudex CMD shim',
       },
     );
+    for (const shortcut of claudexShortcuts()) {
+      files.push({
+        path: managedTargetPath(path.join(binDir, `${shortcut.name}.cmd`), options),
+        content: '@echo off\r\n'
+          + `call "%~dp0claudex.cmd" ${shortcut.args.join(' ')} %*\r\n`
+          + 'exit /b %ERRORLEVEL%\r\n',
+        mode: 0o700,
+        label: `Windows ${shortcut.name} shortcut`,
+      });
+    }
   } else {
     files.push({
       path: managedTargetPath(path.join(binDir, 'claudex'), options),
@@ -767,6 +790,15 @@ function desiredFiles(options) {
       mode: 0o700,
       label: 'POSIX claudex launcher',
     });
+    for (const shortcut of claudexShortcuts()) {
+      files.push({
+        path: managedTargetPath(path.join(binDir, shortcut.name), options),
+        content: '#!/bin/sh\n'
+          + `exec "$(dirname "$0")/claudex" ${shortcut.args.join(' ')} "$@"\n`,
+        mode: 0o700,
+        label: `POSIX ${shortcut.name} shortcut`,
+      });
+    }
   }
 
   if (options.profile) {

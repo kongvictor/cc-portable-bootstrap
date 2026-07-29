@@ -9,6 +9,7 @@ PREFERRED_URL=${CLIPROXY_URL:-http://127.0.0.1:8317}
 FALLBACK_URL=${CLAUDEX_FALLBACK_URL:-http://127.0.0.1:8317}
 CHECK_ONLY=0
 FAST_MODE=0
+EFFORT='xhigh'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -20,6 +21,14 @@ while [ "$#" -gt 0 ]; do
       FAST_MODE=1
       shift
       ;;
+    --effort)
+      if [ "$#" -lt 2 ]; then
+        printf '%s\n' 'claudex: --effort requires a value (high|xhigh|max|ultra)' >&2
+        exit 1
+      fi
+      EFFORT=$2
+      shift 2
+      ;;
     --)
       shift
       break
@@ -29,6 +38,20 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+case "$EFFORT" in
+  high|xhigh|max|ultra) ;;
+  *)
+    printf 'claudex: invalid --effort value %s (expected high|xhigh|max|ultra)\n' "$EFFORT" >&2
+    exit 1
+    ;;
+esac
+
+# The proxy strips the "(effort)" suffix and writes reasoning.effort upstream;
+# Claude Code strips the trailing "[1m]" client-side before sending, so the
+# combined form keeps the 1M context budget AND selects the reasoning tier.
+MAIN_MODEL="gpt-5.6-sol(${EFFORT})[1m]"
+SUBAGENT_MODEL="gpt-5.6-sol(${EFFORT})"
 
 if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
   printf '%s\n' 'claudex: Node.js 18+ is required' >&2
@@ -131,6 +154,7 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   else
     printf '%s\n' 'claudex check: Fast mode available via --fast'
   fi
+  printf 'claudex check: reasoning effort=%s (model %s)\n' "$EFFORT" "$MAIN_MODEL"
   exit 0
 fi
 
@@ -148,9 +172,9 @@ export ANTHROPIC_AUTH_TOKEN=$api_key
 if [ "$FAST_MODE" -eq 1 ]; then
   export CLAUDE_CODE_EXTRA_BODY=$fast_extra_body
 fi
-export CLAUDE_CODE_SUBAGENT_MODEL='gpt-5.6-sol'
+export CLAUDE_CODE_SUBAGENT_MODEL=$SUBAGENT_MODEL
 export CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY='3'
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW='360000'
 export ENABLE_TOOL_SEARCH='false'
 
-exec "$CLAUDE_BIN" --permission-mode auto --model 'gpt-5.6-sol[1m]' "$@"
+exec "$CLAUDE_BIN" --permission-mode auto --model "$MAIN_MODEL" "$@"

@@ -201,10 +201,15 @@ process.exit(Number(process.env.FAKE_CLAUDE_EXIT || 0));
 }
 
 // Windows installs claudex.ps1 plus a .cmd shim; POSIX installs one extensionless
-// launcher. Tests assert on whichever this platform is supposed to produce.
+// launcher. Both platforms add the effort/fast shortcut commands. Tests assert
+// on whichever set this platform is supposed to produce.
+const CLAUDEX_SHORTCUT_NAMES = [
+  'claudexfast',
+  ...['high', 'xhigh', 'max', 'ultra'].flatMap((tier) => [`claudex${tier}`, `claudex${tier}fast`]),
+];
 const CLAUDEX_LAUNCHERS = process.platform === 'win32'
-  ? ['claudex.ps1', 'claudex.cmd']
-  : ['claudex'];
+  ? ['claudex.ps1', 'claudex.cmd', ...CLAUDEX_SHORTCUT_NAMES.map((name) => `${name}.cmd`)]
+  : ['claudex', ...CLAUDEX_SHORTCUT_NAMES];
 
 function claudexInstalled(claudeDir) {
   return CLAUDEX_LAUNCHERS.every((name) => fs.existsSync(path.join(claudeDir, 'bin', name)));
@@ -305,6 +310,8 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     assert.match(installedClaudeMd, /codex --sandbox workspace-write --ask-for-approval never mcp-server/);
     assert.match(installedClaudeMd, /"service_tier": "fast"/);
     assert.match(installedClaudeMd, /三个非 Fast 触发词不得传 `service_tier`/);
+    assert.match(installedClaudeMd, /claudexUltraFast/);
+    assert.match(installedClaudeMd, /裸 `claudex` 默认 effort=xhigh/);
     assert.match(installedClaudeMd, /# Following section/);
     assert.doesNotMatch(installedClaudeMd, /- old rule/);
 
@@ -1040,12 +1047,12 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     const launched = await runAsync(launcher, ['--model', 'gpt-5.6-sol', '--print', 'hello'], { env: commonEnv });
     assert.equal(launched.status, 0, launched.stderr || launched.stdout);
     const record = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
-    assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol[1m]']);
+    assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
     assert.deepEqual(record.args.slice(4), ['--model', 'gpt-5.6-sol', '--print', 'hello']);
     assert.equal(record.baseUrl, fallback.url);
     assert.equal(record.authPresent, true);
     assert.equal(record.apiKeyPresent, false);
-    assert.equal(record.subagentModel, 'gpt-5.6-sol');
+    assert.equal(record.subagentModel, 'gpt-5.6-sol(xhigh)');
     assert.equal(record.concurrency, '3');
     assert.equal(record.compactWindow, '360000');
     assert.equal(record.toolSearch, 'false');
@@ -1055,7 +1062,7 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     const fastLaunch = await runAsync(launcher, ['--fast', '--print', 'hello fast'], { env: commonEnv });
     assert.equal(fastLaunch.status, 0, fastLaunch.stderr || fastLaunch.stdout);
     const fastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
-    assert.deepEqual(fastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol[1m]']);
+    assert.deepEqual(fastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
     assert.deepEqual(fastRecord.args.slice(4), ['--print', 'hello fast']);
     assert.deepEqual(JSON.parse(fastRecord.extraBody), {
       metadata: { source: 'test' },
@@ -1065,6 +1072,34 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     const fastCheck = await runAsync(launcher, ['--fast', '--check'], { env: commonEnv });
     assert.equal(fastCheck.status, 0, fastCheck.stderr || fastCheck.stdout);
     assert.match(fastCheck.stdout, /Fast mode enabled \(request speed=fast\)/);
+    assert.match(fastCheck.stdout, /reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
+
+    const effortLaunch = await runAsync(
+      launcher,
+      ['--effort', 'ultra', '--fast', '--print', 'hello effort'],
+      { env: commonEnv },
+    );
+    assert.equal(effortLaunch.status, 0, effortLaunch.stderr || effortLaunch.stdout);
+    const effortRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(effortRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(ultra)[1m]']);
+    assert.deepEqual(effortRecord.args.slice(4), ['--print', 'hello effort']);
+    assert.equal(effortRecord.subagentModel, 'gpt-5.6-sol(ultra)');
+    assert.deepEqual(JSON.parse(effortRecord.extraBody), {
+      metadata: { source: 'test' },
+      speed: 'fast',
+    });
+
+    const effortCheck = await runAsync(launcher, ['--effort', 'max', '--check'], { env: commonEnv });
+    assert.equal(effortCheck.status, 0, effortCheck.stderr || effortCheck.stdout);
+    assert.match(effortCheck.stdout, /reasoning effort=max \(model gpt-5\.6-sol\(max\)\[1m\]\)/);
+
+    const invalidEffort = await runAsync(launcher, ['--effort', 'turbo', '--print', 'must not launch'], { env: commonEnv });
+    assert.equal(invalidEffort.status, 1);
+    assert.match(invalidEffort.stderr, /invalid --effort value/);
+
+    const missingEffortValue = await runAsync(launcher, ['--effort'], { env: commonEnv });
+    assert.equal(missingEffortValue.status, 1);
+    assert.match(missingEffortValue.stderr, /--effort requires a value/);
 
     const malformedFast = await runAsync(launcher, ['--fast', '--print', 'must not launch'], {
       env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: '[]' },
@@ -1149,7 +1184,7 @@ test('Windows claudex Fast mode merges extra body without forwarding launcher fl
     );
     assert.equal(launched.status, 0, launched.stderr || launched.stdout);
     const record = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
-    assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol[1m]']);
+    assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
     assert.deepEqual(record.args.slice(4), ['--print', 'hello fast']);
     assert.equal(record.apiKeyPresent, false);
     assert.deepEqual(JSON.parse(record.extraBody), {
@@ -1164,6 +1199,24 @@ test('Windows claudex Fast mode merges extra body without forwarding launcher fl
     );
     assert.equal(check.status, 0, check.stderr || check.stdout);
     assert.match(check.stdout, /Fast mode enabled \(request speed=fast\)/);
+
+    const effortLaunch = await runAsync(
+      powershell,
+      [...launcherArgs, '--effort', 'ultra', '--print', 'hello effort'],
+      { env: commonEnv },
+    );
+    assert.equal(effortLaunch.status, 0, effortLaunch.stderr || effortLaunch.stdout);
+    const effortRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(effortRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(ultra)[1m]']);
+    assert.deepEqual(effortRecord.args.slice(4), ['--print', 'hello effort']);
+
+    const invalidEffort = await runAsync(
+      powershell,
+      [...launcherArgs, '--effort', 'turbo', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(invalidEffort.status, 1);
+    assert.match(invalidEffort.stderr, /invalid --effort value/);
 
     const malformed = await runAsync(
       powershell,
@@ -1189,8 +1242,10 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
   assert.match(psText, /AllowAutoRedirect\s*=\s*\$false/);
   assert.match(psText, /ANTHROPIC_API_KEY.*\$null/s);
   assert.match(psText, /ANTHROPIC_API_KEY will be removed/);
-  assert.match(psText, /gpt-5\.6-sol\[1m\]/);
+  assert.match(psText, /gpt-5\.6-sol\(\$effort\)\[1m\]/);
   assert.match(psText, /\$argument -eq '--fast'/);
+  assert.match(psText, /\$argument -eq '--effort'/);
+  assert.match(psText, /\$effort = 'xhigh'/);
   assert.match(psText, /CLAUDE_CODE_EXTRA_BODY/);
   assert.match(psText, /\$body\['speed'\] = 'fast'/);
   assert.match(psText, /Fast mode enabled \(request speed=fast\)/);
