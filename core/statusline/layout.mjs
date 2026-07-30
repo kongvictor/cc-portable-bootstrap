@@ -20,6 +20,21 @@ export function isGptModel(modelId) {
   return id.startsWith('gpt-') || id.includes('codex') || /^o\d+(?:-|$)/.test(id);
 }
 
+export function isFastMode(env = {}) {
+  const raw = env?.CLAUDE_CODE_EXTRA_BODY;
+  if (!raw) return false;
+  try {
+    const body = JSON.parse(raw);
+    return body !== null && typeof body === 'object' && !Array.isArray(body) && body.speed === 'fast';
+  } catch {
+    return false;
+  }
+}
+
+export function renderModeSegments(env = {}) {
+  return isFastMode(env) ? [`${YELLOW}Fast${RESET}`] : [];
+}
+
 export function colorFor(percentage) {
   const value = finiteNumber(percentage);
   if (value >= 88) return RED;
@@ -235,13 +250,19 @@ export function appendUsageToHud(hudOutput, segments, detail, columns = 120) {
   return lines.join('\n');
 }
 
-export function renderStandalone(status, snapshot, columns = 120, nowMs = Date.now()) {
+export function renderStandalone(
+  status,
+  snapshot,
+  columns = 120,
+  nowMs = Date.now(),
+  modeSegments = [],
+) {
   const context = status?.context_window || {};
   const percentage = Math.round(finiteNumber(context.used_percentage));
   const contextLine = `Ctx ${progressBar(percentage)} ${colorFor(percentage)}${percentage}%${RESET} ${contextDetail(status)}`;
   return appendUsageToHud(
     contextLine,
-    renderUsageSegments(status, snapshot, nowMs),
+    [...modeSegments, ...renderUsageSegments(status, snapshot, nowMs)],
     '',
     columns,
   );

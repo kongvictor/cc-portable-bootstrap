@@ -9,6 +9,7 @@ import {
   appendUsageToHud,
   contextDetail,
   isGptModel,
+  renderModeSegments,
   renderStandalone,
   renderUsageSegments,
   rescaleStatusForModel,
@@ -158,6 +159,7 @@ export async function renderStatusLine(rawInput, env = process.env) {
     staleSeconds,
   );
   const columns = terminalColumns(env);
+  const modeSegments = renderModeSegments(env);
   const hud = discoverClaudeHud(getClaudeDir(env), env);
 
   if (hud) {
@@ -165,14 +167,14 @@ export async function renderStatusLine(rawInput, env = process.env) {
     if (hudOutput) {
       return appendUsageToHud(
         hudOutput,
-        renderUsageSegments(status, snapshot),
+        [...modeSegments, ...renderUsageSegments(status, snapshot)],
         contextDetail(status),
         columns,
       );
     }
   }
 
-  return renderStandalone(effectiveStatus, snapshot, columns);
+  return renderStandalone(effectiveStatus, snapshot, columns, undefined, modeSegments);
 }
 
 async function main() {

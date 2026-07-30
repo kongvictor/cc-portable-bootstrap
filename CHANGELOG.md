@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- The statusline now displays a `Fast` segment when the effective
+  `CLAUDE_CODE_EXTRA_BODY` request object contains `speed: "fast"`. The marker
+  works with both claude-hud and the standalone fallback, and stays hidden for
+  standard, missing, or malformed request-body settings.
+
 ## 1.1.4
 
 Brings the same reasoning tiers to the Claude-on-GPT launcher that 1.1.3 gave

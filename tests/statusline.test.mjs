@@ -9,7 +9,9 @@ import test from 'node:test';
 import {
   appendUsageToHud,
   contextDetail,
+  isFastMode,
   isGptModel,
+  renderModeSegments,
   renderStandalone,
   renderUsageSegments,
   rescaleStatusForModel,
@@ -63,6 +65,38 @@ test('detects GPT and Codex model families', () => {
   assert.equal(isGptModel('o4-mini'), true);
   assert.equal(isGptModel('o12-research'), true);
   assert.equal(isGptModel('claude-opus-4-6'), false);
+});
+
+test('detects Fast mode strictly from the effective request body', () => {
+  const fast = { CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"test"},"speed":"fast"}' };
+  assert.equal(isFastMode(fast), true);
+  assert.deepEqual(renderModeSegments(fast).map(stripAnsi), ['Fast']);
+
+  for (const extraBody of [
+    undefined,
+    '',
+    '{"speed":"standard"}',
+    '{"speed":"Fast"}',
+    'not-json',
+    '[]',
+    'null',
+    '"fast"',
+  ]) {
+    assert.equal(isFastMode({ CLAUDE_CODE_EXTRA_BODY: extraBody }), false);
+    assert.deepEqual(renderModeSegments({ CLAUDE_CODE_EXTRA_BODY: extraBody }), []);
+  }
+
+  const narrow = stripAnsi(
+    renderStandalone(
+      statusFixture('gpt-5.6-sol'),
+      { seven_day: { used_percentage: 66 } },
+      24,
+      Date.now(),
+      renderModeSegments(fast),
+    ),
+  );
+  assert.equal((narrow.match(/Fast/g) || []).length, 1);
+  assert.match(narrow, /Weekly: 66%/);
 });
 
 test('rescales GPT context to the real 372k window and passes Claude through', () => {
@@ -123,10 +157,13 @@ test('measures ANSI and wide characters without truncating segments', () => {
     rescaleStatusForModel(statusFixture('gpt-5.6-sol')),
     { seven_day: { used_percentage: 66 } },
     120,
+    Date.now(),
+    renderModeSegments({ CLAUDE_CODE_EXTRA_BODY: '{"speed":"fast"}' }),
   );
   const plain = stripAnsi(output);
   assert.match(plain, /Ctx .* 16% \(in:100, cache:60k\)/);
-  assert.match(plain, /Weekly: 66%/);
+  assert.equal((plain.match(/Fast/g) || []).length, 1);
+  assert.match(plain, /Fast.*Weekly: 66%/s);
   assert.doesNotMatch(plain, /GPTCtx/);
 });
 
@@ -490,6 +527,7 @@ test('runtime integrates with HUD while passing it rescaled GPT context', () => 
       CLAUDE_CONFIG_DIR: claudeDir,
       CLIPROXY_USAGE_DIR: usageDir,
       CLIPROXY_DISABLE_REFRESH: '1',
+      CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"test"},"speed":"fast"}',
       HUD_CAPTURE: capture,
       COLUMNS: '120',
     },
@@ -498,7 +536,8 @@ test('runtime integrates with HUD while passing it rescaled GPT context', () => 
   assert.equal(result.status, 0, result.stderr);
   const plain = stripAnsi(result.stdout);
   assert.match(plain, /Context .*16% \(in:100, cache:60k\)/);
-  assert.match(plain, /Weekly: 66%/);
+  assert.equal((plain.match(/Fast/g) || []).length, 1);
+  assert.match(plain, /Fast.*Weekly: 66%/s);
   assert.match(plain, /Git main/);
   assert.doesNotMatch(plain, /GPTCtx/);
   const hudInput = JSON.parse(fs.readFileSync(capture, 'utf8'));
@@ -528,6 +567,7 @@ test('missing CLIPROXY_URL skips refresh but still renders existing snapshots', 
   };
   delete env.CLIPROXY_URL;
   delete env.CLIPROXY_DISABLE_REFRESH;
+  delete env.CLAUDE_CODE_EXTRA_BODY;
 
   const result = spawnSync(process.execPath, [path.join(repository, 'core/statusline/runtime.mjs')], {
     input: JSON.stringify(statusFixture('gpt-5.6-sol')),
@@ -535,7 +575,9 @@ test('missing CLIPROXY_URL skips refresh but still renders existing snapshots', 
     env,
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(stripAnsi(result.stdout), /Weekly: 42%/);
+  const plain = stripAnsi(result.stdout);
+  assert.match(plain, /Weekly: 42%/);
+  assert.doesNotMatch(plain, /Fast/);
   assert.equal(fs.existsSync(path.join(usageDir, '.refresh-attempt')), false);
 });
 
@@ -593,10 +635,13 @@ test('POSIX install places a stable launcher in an isolated Claude directory', {
       CLAUDE_CONFIG_DIR: claudeDir,
       CLIPROXY_USAGE_DIR: path.join(root, 'empty-usage'),
       CLIPROXY_DISABLE_REFRESH: '1',
+      CLAUDE_CODE_EXTRA_BODY: '{"speed":"fast"}',
     },
   });
   assert.equal(launch.status, 0, launch.stderr);
-  assert.match(stripAnsi(launch.stdout), /16% \(in:100, cache:60k\)/);
+  const plain = stripAnsi(launch.stdout);
+  assert.match(plain, /16% \(in:100, cache:60k\)/);
+  assert.equal((plain.match(/Fast/g) || []).length, 1);
 });
 
 test('an installed runtime older than the checkout is detected as stale', {
