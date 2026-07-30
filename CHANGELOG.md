@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.1.5
+
+Makes the active Codex Fast service tier visible in the claudex statusline.
 
 ### Added
 
