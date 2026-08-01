@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Portable, cross-platform Claude Code agent environment: Codex MCP, working modes, claudex launcher with Fast tier, and a model-aware statusline.",
-    "version": "1.1.5"
+    "version": "1.2.0"
   },
   "plugins": [
     {
@@ -32,7 +32,7 @@
     {
       "name": "cc-portable-bootstrap",
       "source": "./",
-      "description": "One-command setup of a portable Claude Code agent environment: stable Codex MCP, Codex implementation mode, the claudex GPT launcher, and a statusline showing the real GPT context window plus official Claude/ChatGPT quota.",
+      "description": "One-command setup of a portable Claude Code agent environment: stable Codex MCP, Sol/Luna/Terra implementation modes, model-aware claudex launchers, and a statusline showing the real GPT context window plus official Claude/ChatGPT quota.",
       "category": "workflow",
       "tags": ["bootstrap", "codex", "mcp", "statusline", "cliproxyapi", "portable"]
     }

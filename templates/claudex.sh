@@ -9,6 +9,7 @@ PREFERRED_URL=${CLIPROXY_URL:-http://127.0.0.1:8317}
 FALLBACK_URL=${CLAUDEX_FALLBACK_URL:-http://127.0.0.1:8317}
 CHECK_ONLY=0
 FAST_MODE=0
+MODEL_FAMILY='sol'
 EFFORT='xhigh'
 
 while [ "$#" -gt 0 ]; do
@@ -20,6 +21,14 @@ while [ "$#" -gt 0 ]; do
     --fast)
       FAST_MODE=1
       shift
+      ;;
+    --gpt-model)
+      if [ "$#" -lt 2 ]; then
+        printf '%s\n' 'claudex: --gpt-model requires a value (sol|luna|terra)' >&2
+        exit 1
+      fi
+      MODEL_FAMILY=$2
+      shift 2
       ;;
     --effort)
       if [ "$#" -lt 2 ]; then
@@ -47,11 +56,31 @@ case "$EFFORT" in
     ;;
 esac
 
+case "$MODEL_FAMILY" in
+  sol)
+    MODEL_ID='gpt-5.6-sol'
+    ;;
+  luna)
+    if [ "$EFFORT" = 'ultra' ]; then
+      printf '%s\n' 'claudex: gpt-5.6-luna does not support effort ultra (expected high|xhigh|max)' >&2
+      exit 1
+    fi
+    MODEL_ID='gpt-5.6-luna'
+    ;;
+  terra)
+    MODEL_ID='gpt-5.6-terra'
+    ;;
+  *)
+    printf 'claudex: invalid --gpt-model value %s (expected sol|luna|terra)\n' "$MODEL_FAMILY" >&2
+    exit 1
+    ;;
+esac
+
 # The proxy strips the "(effort)" suffix and writes reasoning.effort upstream;
 # Claude Code strips the trailing "[1m]" client-side before sending, so the
 # combined form keeps the 1M context budget AND selects the reasoning tier.
-MAIN_MODEL="gpt-5.6-sol(${EFFORT})[1m]"
-SUBAGENT_MODEL="gpt-5.6-sol(${EFFORT})"
+MAIN_MODEL="${MODEL_ID}(${EFFORT})[1m]"
+SUBAGENT_MODEL="${MODEL_ID}(${EFFORT})"
 
 if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
   printf '%s\n' 'claudex: Node.js 18+ is required' >&2
@@ -154,7 +183,7 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   else
     printf '%s\n' 'claudex check: Fast mode available via --fast'
   fi
-  printf 'claudex check: reasoning effort=%s (model %s)\n' "$EFFORT" "$MAIN_MODEL"
+  printf 'claudex check: GPT model=%s, reasoning effort=%s (model %s)\n' "$MODEL_FAMILY" "$EFFORT" "$MAIN_MODEL"
   exit 0
 fi
 

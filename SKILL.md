@@ -14,10 +14,10 @@ allowed-tools: Bash, Read, Skill, AskUserQuestion
 
 - bootstrap 永远不要读取、复制、打印或让用户粘贴 `~/.secrets/cliproxy_apikey` 的值。只允许用文件元数据判断它是否存在且非空；仅安装后的 launcher 可在运行时读取，并且不得输出。
 - launcher 启动 Claude 前必须移除继承的 `ANTHROPIC_API_KEY`，只注入 `ANTHROPIC_AUTH_TOKEN`，避免 Claude Code 2.1.220+ 同时发送两种认证 header。
-- 需要更快的同模型推理时使用 `claudex --fast`。launcher 会保留已有的 `CLAUDE_CODE_EXTRA_BODY` JSON object，并强制加入 `"speed":"fast"`；CLIProxyAPI 将它映射为 Codex priority/Fast tier。`--fast` 和 `--check` 属于 launcher 参数，必须放在 Claude Code 参数之前；`claudex --fast --check` 只检查，不启动会话。不要用 Claude Code 会话内的 `/fast` 代替，它走 Anthropic 原生 Fast 模型路径。
+- claudex 用 `--gpt-model sol|luna|terra` 选择 GPT-5.6 模型，用 `--effort high|xhigh|max|ultra` 选择模型支持的档位；Luna 不支持 Ultra。需要更快的同模型推理时加 `--fast`。launcher 会保留已有的 `CLAUDE_CODE_EXTRA_BODY` JSON object，并强制加入 `"speed":"fast"`；CLIProxyAPI 将它映射为 Codex priority/Fast tier。`--gpt-model`、`--effort`、`--fast` 和 `--check` 属于 launcher 参数，必须放在 Claude Code 参数之前；带 `--check` 只检查，不启动会话。不要用 Claude Code 会话内的 `/fast` 代替，它走 Anthropic 原生 Fast 模型路径。
 - 永远不要读取或同步整份 `~/.claude.json`。Codex MCP 只通过 `claude mcp get/add` 自动检查和注册，并且 scope 必须是 `user`。禁止自动 remove/replace；CLI 无 compare-and-swap，需要删除时必须保留当前定义并要求用户手工处理。
 - 不允许 `danger-full-access`；Codex 实现模式只能使用 `read-only` 或 `workspace-write`，`approval-policy` 固定为 `never`。Bootstrap 新注册的 Codex MCP 必须使用 `codex --sandbox workspace-write --ask-for-approval never mcp-server`。
-- Codex 实现模式有六个完整触发词，按最长关键词匹配：`CodexDev`、`CodexDevMax`、`CodexDevUltra` 分别使用 `xhigh`、`max`、`ultra` effort；对应 Fast 变体为 `CodexDevFast`、`CodexDevMaxFast`、`CodexDevUltraFast`。Fast 变体每次调用 `mcp__codex__codex` 时都在 `config` 中额外传 `"service_tier": "fast"`，非 Fast 变体不得传 `service_tier`；其他模型、sandbox、`approval-policy` 和 `threadId` 复用规则相同。“使用 <触发词>”仅当前任务，“进入 <触发词>”持续启用，“退出 CodexDev”或“退出 <当前触发词>”结束持续模式。
+- Codex 实现模式有 22 个完整触发词，格式为 `Codex<Model><Effort>[Fast]`，按最长关键词匹配。Sol=`gpt-5.6-sol` 和 Terra=`gpt-5.6-terra` 支持 `high/xhigh/max/ultra`；Luna=`gpt-5.6-luna` 支持 `high/xhigh/max`，不得生成 Luna Ultra。触发词决定精确 `model` 和 `config.model_reasoning_effort`；Fast 变体额外传 `"service_tier": "fast"`，非 Fast 变体不得传 `service_tier`。sandbox、`approval-policy` 和 `threadId` 复用规则不变。“使用 <触发词>”仅当前任务，“进入 <触发词>”持续启用，“退出 Codex”或“退出 <当前触发词>”结束持续模式。claudex 使用同一 22 组合生成 agent 触发词和终端快捷命令；裸 `claudex`/`claudexfast` 分别默认 Sol+xhigh 标准/Fast。
 - statusline 由本仓库 `core/statusline/install.mjs` 安装。不要手改 `settings.json` 的 `statusLine`，也不要复制 renderer 或 snapshot 实现。
 - 不初始化 Git，不 commit，不 push。
 

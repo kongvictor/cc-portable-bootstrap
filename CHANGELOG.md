@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0
+
+Adds explicit GPT-5.6 model selection to both delegation paths and removes the old model-implicit trigger and shortcut names.
+
+### Added
+
+- 22 `Codex<Model><Effort>[Fast]` managed triggers across Sol, Luna, and Terra. Each trigger selects the exact model ID, supported reasoning effort, and optional Fast service tier for Codex MCP delegation.
+- Matching `claudex<Model><Effort>[Fast]` agent triggers and terminal shortcuts. The launcher accepts `--gpt-model sol|luna|terra`; bare `claudex` and `claudexfast` remain Sol+xhigh defaults.
+- Model capability validation in both launchers. Luna accepts `high`, `xhigh`, and `max`; Sol and Terra additionally accept `ultra`.
+
+### Changed
+
+- Removed `CodexDev*`, the recognized legacy local CodexDev alias section, tier-only claudex agent triggers, and tier-only terminal shortcut names. Setup safely removes an obsolete wrapper only when its contents exactly match a prior bootstrap-generated file; modified files are preserved with a warning.
+- `claudex --check` now reports the selected model family, effort, and composed model.
+
 ## 1.1.5
 
 Makes the active Codex Fast service tier visible in the claudex statusline.

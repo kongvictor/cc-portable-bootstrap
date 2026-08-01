@@ -6,8 +6,8 @@ One `setup` provisions the whole environment:
 
 1. **Dependencies** — installs the Codex CLI and, when this host needs one, [cliproxyapi](https://github.com/router-for-me/CLIProxyAPI), plus the required Claude Code plugins.
 2. **Codex MCP** — registers a stable Codex binary as a user-scope MCP server using `codex --sandbox workspace-write --ask-for-approval never mcp-server`, so Claude can delegate implementation to Codex with safe defaults.
-3. **Working modes** — installs six *Claude orchestrates / Codex implements* triggers into your user `CLAUDE.md`: `CodexDev`, `CodexDevMax`, and `CodexDevUltra` select `xhigh`, `max`, and `ultra` reasoning; each also has a `Fast` suffix variant.
-4. **`claudex`** — a launcher that runs Claude Code against GPT models through a local or tunnelled proxy, with a fail-closed health check, selectable reasoning tiers, and an opt-in Codex Fast tier.
+3. **Working modes** — installs 22 model-aware *Claude orchestrates / Codex implements* triggers into your user `CLAUDE.md`: `Codex<Model><Effort>[Fast]` selects Sol, Luna, or Terra plus `high`, `xhigh`, `max`, or supported `ultra` reasoning.
+4. **`claudex`** — a launcher that runs Claude Code against GPT-5.6 Sol/Luna/Terra through a local or tunnelled proxy, with a fail-closed health check, model-aware reasoning tiers, matching shortcuts, and an opt-in Codex Fast tier.
 5. **Statusline** — a Node runtime layered on [claude-hud](https://github.com/jarrodwatts/claude-hud) that rescales GPT/Codex context to its real window, always shows input/cache tokens, appends official Claude/ChatGPT quota, and marks Fast-tier sessions.
 6. **Autostart** — keeps a local proxy running across reboots (launchd / systemd --user / a logon scheduled task on Windows).
 
@@ -20,6 +20,14 @@ Signing in is interactive upstream — Codex uses a ChatGPT OAuth flow, cliproxy
 - Node.js 18+
 - Claude Code CLI
 - macOS, Linux, WSL2, or native Windows (no Git Bash required)
+
+## Model-aware modes
+
+- Sol: `gpt-5.6-sol`, efforts `high|xhigh|max|ultra`
+- Luna: `gpt-5.6-luna`, efforts `high|xhigh|max` (no Ultra)
+- Terra: `gpt-5.6-terra`, efforts `high|xhigh|max|ultra`
+- Every valid pair has standard and `Fast` prompt triggers. Codex triggers use `Codex<Model><Effort>[Fast]`; claudex triggers and shortcuts use `claudex<Model><Effort>[Fast]`.
+- Bare `claudex` defaults to Sol+xhigh. `claudexfast` defaults to Sol+xhigh+Fast. Direct selection uses `claudex --gpt-model sol|luna|terra --effort high|xhigh|max|ultra [--fast]`.
 
 ## Install
 
@@ -67,12 +75,12 @@ scripts/setup-posix.sh uninstall --yes
 - Existing configuration is merged, never clobbered. A statusLine this installer does not recognise is left alone unless you pass `--force`.
 - Codex MCP is **never** removed or replaced automatically: the Claude CLI has no compare-and-swap remove, so a conflicting definition is reported for manual handling instead of risking the deletion of a concurrently registered server.
 - `claudex` strips any inherited `ANTHROPIC_API_KEY` before launching Claude Code, so the proxy sees exactly one credential.
-- `claudex --fast` keeps the configured GPT model and injects `speed: "fast"` into Claude Code's request body. Current CLIProxyAPI translates that to Codex's priority/Fast service tier; use `claudex --fast --check` to verify launcher selection without starting a session. Launcher-only flags must come before any Claude Code arguments. This is intentionally separate from Claude Code's in-session `/fast`, which selects Anthropic's native Fast model path.
+- `claudex --gpt-model <sol|luna|terra> --effort <tier> [--fast]` selects the exact GPT-5.6 model and supported reasoning tier. Fast injects `speed: "fast"` into Claude Code's request body; current CLIProxyAPI translates that to Codex's priority/Fast service tier. Use `--check` to verify selection without starting a session. Launcher-only flags must come before any Claude Code arguments. This remains separate from Claude Code's in-session `/fast`, which selects Anthropic's native Fast model path.
 
 ## Development
 
 ```bash
-npm test          # node --test tests/*.test.mjs
+npm test          # node --test
 npm run check     # syntax check the Node core
 npm run check:posix
 ```

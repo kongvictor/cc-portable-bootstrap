@@ -45,6 +45,13 @@ const LEGACY_PATH_MARKERS = [{
   end: '# <<< claude-portable-bootstrap PATH <<<',
 }];
 const CODEX_HEADING = '# Claude 调度 + Codex 实现模式';
+const LEGACY_CODEX_ALIAS_HEADING = '# CodexDev / CodexDevFast 触发词（用户自定义，非 managed block）';
+const LEGACY_CODEX_ALIAS_SIGNATURES = Object.freeze([
+  'CodexDev` 是上方 managed block',
+  'CodexDevFast` = CodexDev',
+  'service_tier',
+  'gpt-5.6-sol catalog',
+]);
 const SECRET_BASENAME = 'cliproxy_apikey';
 const CODEX_MCP_ARGS = Object.freeze([
   '--sandbox',
@@ -578,6 +585,25 @@ function adoptLegacyMarkers(text, legacyMarkers, begin, end) {
   return adopted;
 }
 
+function removeRecognizedLegacyCodexAliasSection(text) {
+  const lines = text.split('\n');
+  const matches = lines
+    .map((line, index) => (line.trim() === LEGACY_CODEX_ALIAS_HEADING ? index : -1))
+    .filter((index) => index >= 0);
+  if (matches.length > 1) throw new Error('Duplicate legacy CodexDev alias sections in CLAUDE.md');
+  if (matches.length === 0) return text;
+
+  const start = matches[0];
+  let end = start + 1;
+  while (end < lines.length && !/^#\s+/.test(lines[end])) end += 1;
+  const section = lines.slice(start, end).join('\n');
+  if (!LEGACY_CODEX_ALIAS_SIGNATURES.every((signature) => section.includes(signature))) {
+    throw new Error('Unrecognized legacy CodexDev alias section in CLAUDE.md; review it manually');
+  }
+  lines.splice(start, end - start);
+  return lines.join('\n');
+}
+
 function updateCodexManagedBlock(original, template) {
   const { bom, body } = splitBom(original);
   const eol = eolOf(body);
@@ -612,6 +638,7 @@ function updateCodexManagedBlock(original, template) {
     }
   }
 
+  normalized = removeRecognizedLegacyCodexAliasSection(normalized);
   return `${bom}${normalized.replaceAll('\n', eol)}`;
 }
 
@@ -730,17 +757,46 @@ function readRegularManagedFile(file, options) {
   }
 }
 
-// Terminal shortcuts: claudex<tier>[fast] plus claudexfast. Bare claudex
-// already defaults to xhigh without Fast, so no claudexxhigh-only alias is
-// strictly needed, but it is generated anyway so every documented trigger
-// word has a matching command.
+const CLAUDEX_MODELS = Object.freeze([
+  Object.freeze({ name: 'sol', efforts: Object.freeze(['high', 'xhigh', 'max', 'ultra']) }),
+  Object.freeze({ name: 'luna', efforts: Object.freeze(['high', 'xhigh', 'max']) }),
+  Object.freeze({ name: 'terra', efforts: Object.freeze(['high', 'xhigh', 'max', 'ultra']) }),
+]);
+
+const LEGACY_CLAUDEX_TIERS = Object.freeze(['high', 'xhigh', 'max', 'ultra']);
+
+// Terminal shortcuts carry both model and effort. Bare claudex defaults to
+// Sol+xhigh without Fast; claudexfast keeps the matching default Fast alias.
 function claudexShortcuts() {
   const shortcuts = [{ name: 'claudexfast', args: ['--fast'] }];
-  for (const tier of ['high', 'xhigh', 'max', 'ultra']) {
-    shortcuts.push({ name: `claudex${tier}`, args: ['--effort', tier] });
-    shortcuts.push({ name: `claudex${tier}fast`, args: ['--effort', tier, '--fast'] });
+  for (const model of CLAUDEX_MODELS) {
+    for (const effort of model.efforts) {
+      const prefix = `claudex${model.name}${effort}`;
+      const args = ['--gpt-model', model.name, '--effort', effort];
+      shortcuts.push({ name: prefix, args });
+      shortcuts.push({ name: `${prefix}fast`, args: [...args, '--fast'] });
+    }
   }
   return shortcuts;
+}
+
+function claudexShortcutContent(shortcut, platform = process.platform) {
+  return platform === 'win32'
+    ? '@echo off\r\n'
+      + `call "%~dp0claudex.cmd" ${shortcut.args.join(' ')} %*\r\n`
+      + 'exit /b %ERRORLEVEL%\r\n'
+    : '#!/bin/sh\n'
+      + `exec "$(dirname "$0")/claudex" ${shortcut.args.join(' ')} "$@"\n`;
+}
+
+function legacyClaudexShortcuts() {
+  return LEGACY_CLAUDEX_TIERS.flatMap((effort) => {
+    const args = ['--effort', effort];
+    return [
+      { name: `claudex${effort}`, args },
+      { name: `claudex${effort}fast`, args: [...args, '--fast'] },
+    ];
+  });
 }
 
 function desiredFiles(options) {
@@ -776,9 +832,7 @@ function desiredFiles(options) {
     for (const shortcut of claudexShortcuts()) {
       files.push({
         path: managedTargetPath(path.join(binDir, `${shortcut.name}.cmd`), options),
-        content: '@echo off\r\n'
-          + `call "%~dp0claudex.cmd" ${shortcut.args.join(' ')} %*\r\n`
-          + 'exit /b %ERRORLEVEL%\r\n',
+        content: claudexShortcutContent(shortcut),
         mode: 0o700,
         label: `Windows ${shortcut.name} shortcut`,
       });
@@ -793,8 +847,7 @@ function desiredFiles(options) {
     for (const shortcut of claudexShortcuts()) {
       files.push({
         path: managedTargetPath(path.join(binDir, shortcut.name), options),
-        content: '#!/bin/sh\n'
-          + `exec "$(dirname "$0")/claudex" ${shortcut.args.join(' ')} "$@"\n`,
+        content: claudexShortcutContent(shortcut),
         mode: 0o700,
         label: `POSIX ${shortcut.name} shortcut`,
       });
@@ -816,6 +869,49 @@ function desiredFiles(options) {
 
   for (const file of files) guardManagedPath(file.path, options);
   return files;
+}
+
+function inspectObsoleteClaudexShortcuts(options) {
+  const binDir = path.join(options.configDir, 'bin');
+  const removals = [];
+  const warnings = [];
+  for (const shortcut of legacyClaudexShortcuts()) {
+    const basename = process.platform === 'win32' ? `${shortcut.name}.cmd` : shortcut.name;
+    const logicalTarget = path.resolve(path.join(binDir, basename));
+    guardManagedPath(logicalTarget, options);
+    const expectedContent = claudexShortcutContent(shortcut);
+    let target;
+    let current;
+    try {
+      const metadata = fs.lstatSync(logicalTarget);
+      if (metadata.isSymbolicLink() || !metadata.isFile()) {
+        warnings.push(`obsolete claudex shortcut was preserved because it is not a regular managed file: ${logicalTarget}`);
+        continue;
+      }
+      target = managedTargetPath(logicalTarget, options);
+      if (normalizePathForCompare(target) !== normalizePathForCompare(logicalTarget)) {
+        warnings.push(`obsolete claudex shortcut was preserved because its path resolves through a symlink: ${logicalTarget}`);
+        continue;
+      }
+      current = readRegularManagedFile(target, options);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      warnings.push(`obsolete claudex shortcut was preserved because it could not be inspected safely: ${logicalTarget}`);
+      continue;
+    }
+    if (current.data.toString('utf8') !== expectedContent) {
+      warnings.push(`obsolete claudex shortcut was preserved because its content was modified: ${target}`);
+      continue;
+    }
+    removals.push({
+      action: 'remove',
+      path: target,
+      expectedContent,
+      mode: current.mode,
+      label: `obsolete ${shortcut.name} shortcut`,
+    });
+  }
+  return { removals, warnings };
 }
 
 function fileNeedsChange(file, options) {
@@ -878,6 +974,7 @@ function buildContext(options) {
     throw new Error('No stable Codex binary with `mcp-server` support found (cmux/TEMP shims are excluded)');
   }
   const files = desiredFiles(options);
+  const obsoleteShortcuts = inspectObsoleteClaudexShortcuts(options);
   const statusline = inspectStatusline(options);
   return {
     options,
@@ -885,7 +982,11 @@ function buildContext(options) {
     codexBin,
     currentMcp,
     files,
-    changedFiles: files.filter((file) => fileNeedsChange(file, options)),
+    changedFiles: [
+      ...files.filter((file) => fileNeedsChange(file, options)).map((file) => ({ ...file, action: 'write' })),
+      ...obsoleteShortcuts.removals,
+    ],
+    warnings: obsoleteShortcuts.warnings,
     mcpChange: mcpMatches(currentMcp, codexBin) ? 'none' : (currentMcp.present ? 'replace' : 'add'),
     externalChanges: [...new Set(options.externalChanges)],
     secret: secretStatus(options),
@@ -907,6 +1008,7 @@ function buildCheckContext(options) {
   }
   const codexBin = findCodex(options, currentMcp);
   const files = desiredFiles(options);
+  const obsoleteShortcuts = inspectObsoleteClaudexShortcuts(options);
   const statusline = inspectStatusline(options);
   return {
     options,
@@ -915,7 +1017,11 @@ function buildCheckContext(options) {
     currentMcp,
     mcpInspection,
     files,
-    changedFiles: files.filter((file) => fileNeedsChange(file, options)),
+    changedFiles: [
+      ...files.filter((file) => fileNeedsChange(file, options)).map((file) => ({ ...file, action: 'write' })),
+      ...obsoleteShortcuts.removals,
+    ],
+    warnings: obsoleteShortcuts.warnings,
     mcpChange: claudeBin && mcpInspection === 'ok' && codexBin
       ? (mcpMatches(currentMcp, codexBin) ? 'none' : (currentMcp.present ? 'replace' : 'add'))
       : 'unknown',
@@ -979,6 +1085,14 @@ function printCheck(context) {
       console.log(`[warning] A ${reason} claudex shell function may shadow the installed executable`);
     }
   }
+  for (const file of (context.changedFiles || []).filter((entry) => entry.action === 'remove')) {
+    healthy = false;
+    console.log(`[needs-setup] remove ${file.label}: ${file.path}`);
+  }
+  for (const warning of context.warnings || []) {
+    healthy = false;
+    console.log(`[warning] ${warning}`);
+  }
 
   if (context.secret.present) console.log('[ok] claudex secret file: present and non-empty (value not read)');
   else {
@@ -1007,7 +1121,10 @@ function printCheck(context) {
 function printPlan(context, action) {
   const prefix = action === 'restore' ? 'restore' : 'setup';
   console.log(`${prefix} plan:`);
-  for (const file of context.changedFiles || []) console.log(`  - write: ${file.path} (${file.label})`);
+  for (const file of context.changedFiles || []) {
+    console.log(`  - ${file.action || 'write'}: ${file.path} (${file.label})`);
+  }
+  for (const warning of context.warnings || []) console.log(`  - warning: ${warning}`);
   if (context.mcpChange && context.mcpChange !== 'none') {
     console.log(`  - ${context.mcpChange}: user-scope Codex MCP via \`claude mcp\` CLI`);
   }
@@ -1109,6 +1226,14 @@ function removeManagedFile(file, options) {
     fs.unlinkSync(basename);
   });
   assertStableManagedPath(target, options);
+}
+
+function removeManagedFileWithExpectedContent(file, expectedContent, options) {
+  const current = readRegularManagedFile(file, options);
+  if (current.data.toString('utf8') !== expectedContent) {
+    throw new Error(`Refusing to remove a managed file whose content changed after planning: ${file}`);
+  }
+  removeManagedFile(file, options);
 }
 
 function backupRoot(options) {
@@ -1459,7 +1584,13 @@ async function setup(options) {
   const backup = createBackup(options, context);
   const mcpMutation = { removed: false, added: false };
   try {
-    for (const file of context.changedFiles) writeAtomic(file.path, file.content, file.mode, options);
+    for (const file of context.changedFiles) {
+      if (file.action === 'remove') {
+        removeManagedFileWithExpectedContent(file.path, file.expectedContent, options);
+      } else {
+        writeAtomic(file.path, file.content, file.mode, options);
+      }
+    }
     applyMcpDesired(context, options, mcpMutation);
     if (statuslineApplies) {
       // configure.mjs performs its own atomic write, backup and rollback for

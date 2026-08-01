@@ -201,18 +201,66 @@ process.exit(Number(process.env.FAKE_CLAUDE_EXIT || 0));
 }
 
 // Windows installs claudex.ps1 plus a .cmd shim; POSIX installs one extensionless
-// launcher. Both platforms add the effort/fast shortcut commands. Tests assert
-// on whichever set this platform is supposed to produce.
-const CLAUDEX_SHORTCUT_NAMES = [
-  'claudexfast',
-  ...['high', 'xhigh', 'max', 'ultra'].flatMap((tier) => [`claudex${tier}`, `claudex${tier}fast`]),
+// launcher. Both platforms add all 22 valid model/effort/Fast shortcuts plus the
+// default claudexfast alias. Tests assert exact inventory and wrapper arguments.
+const CLAUDEX_MODELS = [
+  { name: 'sol', trigger: 'Sol', efforts: ['high', 'xhigh', 'max', 'ultra'] },
+  { name: 'luna', trigger: 'Luna', efforts: ['high', 'xhigh', 'max'] },
+  { name: 'terra', trigger: 'Terra', efforts: ['high', 'xhigh', 'max', 'ultra'] },
 ];
+const triggerEffort = (effort) => `${effort[0].toUpperCase()}${effort.slice(1)}`;
+const CLAUDEX_MODEL_SHORTCUTS = CLAUDEX_MODELS.flatMap((model) => (
+  model.efforts.flatMap((effort) => {
+    const name = `claudex${model.name}${effort}`;
+    const args = ['--gpt-model', model.name, '--effort', effort];
+    return [
+      { name, args },
+      { name: `${name}fast`, args: [...args, '--fast'] },
+    ];
+  })
+));
+const CLAUDEX_SHORTCUTS = [
+  { name: 'claudexfast', args: ['--fast'] },
+  ...CLAUDEX_MODEL_SHORTCUTS,
+];
+const CODEX_TRIGGERS = CLAUDEX_MODELS.flatMap((model) => (
+  model.efforts.flatMap((effort) => {
+    const name = `Codex${model.trigger}${triggerEffort(effort)}`;
+    return [name, `${name}Fast`];
+  })
+));
+const CLAUDEX_SHORTCUT_NAMES = CLAUDEX_SHORTCUTS.map(({ name }) => name);
 const CLAUDEX_LAUNCHERS = process.platform === 'win32'
   ? ['claudex.ps1', 'claudex.cmd', ...CLAUDEX_SHORTCUT_NAMES.map((name) => `${name}.cmd`)]
   : ['claudex', ...CLAUDEX_SHORTCUT_NAMES];
 
+function claudexShortcutFile(name) {
+  return process.platform === 'win32' ? `${name}.cmd` : name;
+}
+
+function claudexShortcutContent(shortcut) {
+  return process.platform === 'win32'
+    ? '@echo off\r\n'
+      + `call "%~dp0claudex.cmd" ${shortcut.args.join(' ')} %*\r\n`
+      + 'exit /b %ERRORLEVEL%\r\n'
+    : '#!/bin/sh\n'
+      + `exec "$(dirname "$0")/claudex" ${shortcut.args.join(' ')} "$@"\n`;
+}
+
 function claudexInstalled(claudeDir) {
   return CLAUDEX_LAUNCHERS.every((name) => fs.existsSync(path.join(claudeDir, 'bin', name)));
+}
+
+function assertClaudexShortcutInstall(claudeDir) {
+  const binDir = path.join(claudeDir, 'bin');
+  const installed = fs.readdirSync(binDir).filter((name) => name.startsWith('claudex')).sort();
+  assert.deepEqual(installed, [...CLAUDEX_LAUNCHERS].sort());
+  assert.equal(CLAUDEX_MODEL_SHORTCUTS.length, 22);
+  assert.equal(CLAUDEX_SHORTCUTS.length, 23);
+  for (const shortcut of CLAUDEX_SHORTCUTS) {
+    const file = path.join(binDir, claudexShortcutFile(shortcut.name));
+    assert.equal(fs.readFileSync(file, 'utf8'), claudexShortcutContent(shortcut));
+  }
 }
 
 function claudexAbsent(claudeDir) {
@@ -295,23 +343,35 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     const installedClaudeMd = fs.readFileSync(path.join(claudeDir, 'CLAUDE.md'), 'utf8');
     assert.equal((installedClaudeMd.match(/BEGIN cc-portable-bootstrap:codex-mode/g) || []).length, 1);
     assert.match(installedClaudeMd, /threadId/);
-    assert.match(installedClaudeMd, /gpt-5\.6-sol/);
+    assert.match(installedClaudeMd, /Codex 触发词共有 22 个/);
+    const installedCodexTriggers = [...installedClaudeMd.matchAll(
+      /`(Codex(?:Sol|Luna|Terra)(?:High|Xhigh|Max|Ultra)(?:Fast)?)`/g,
+    )].map((match) => match[1]);
+    assert.deepEqual([...new Set(installedCodexTriggers)].sort(), [...CODEX_TRIGGERS].sort());
+    assert.equal(CODEX_TRIGGERS.length, 22);
+    assert.doesNotMatch(installedClaudeMd, /CodexLunaUltra(?:Fast)?/);
+    assert.doesNotMatch(installedClaudeMd, /CodexDev/);
+    assert.match(installedClaudeMd, /Sol\/Luna\/Terra 分别决定 `model` 为 `gpt-5\.6-sol`、`gpt-5\.6-luna`、`gpt-5\.6-terra`/);
+    assert.match(installedClaudeMd, /High\/Xhigh\/Max\/Ultra 分别决定 `config\.model_reasoning_effort`/);
     assert.match(installedClaudeMd, /approval-policy.*never/);
     assert.match(installedClaudeMd, /read-only/);
     assert.match(installedClaudeMd, /workspace-write/);
     assert.match(installedClaudeMd, /禁止 `danger-full-access`/);
     assert.match(installedClaudeMd, /按最长的完整关键词匹配/);
-    assert.match(installedClaudeMd, /`CodexDev`：`config\.model_reasoning_effort` 为 `xhigh`/);
-    assert.match(installedClaudeMd, /`CodexDevMax`：`config\.model_reasoning_effort` 为 `max`/);
-    assert.match(installedClaudeMd, /`CodexDevUltra`：`config\.model_reasoning_effort` 为 `ultra`/);
-    assert.match(installedClaudeMd, /`CodexDevFast`：effort 为 `xhigh`/);
-    assert.match(installedClaudeMd, /`CodexDevMaxFast`：effort 为 `max`/);
-    assert.match(installedClaudeMd, /`CodexDevUltraFast`：effort 为 `ultra`/);
     assert.match(installedClaudeMd, /codex --sandbox workspace-write --ask-for-approval never mcp-server/);
     assert.match(installedClaudeMd, /"service_tier": "fast"/);
-    assert.match(installedClaudeMd, /三个非 Fast 触发词不得传 `service_tier`/);
-    assert.match(installedClaudeMd, /claudexUltraFast/);
-    assert.match(installedClaudeMd, /裸 `claudex` 默认 effort=xhigh/);
+    assert.match(installedClaudeMd, /非 Fast 触发词不得传 `service_tier`/);
+    assert.match(installedClaudeMd, /claudex 模型触发词共有 22 个/);
+    assert.match(installedClaudeMd, /`claudexSolHigh`/);
+    assert.match(installedClaudeMd, /`claudexLunaMax`/);
+    assert.match(installedClaudeMd, /`claudexTerraUltra`/);
+    assert.match(installedClaudeMd, /`claudexFast` 使用 Sol\+xhigh\+Fast/);
+    assert.match(installedClaudeMd, /裸 `claudex` 为 Sol\+xhigh/);
+    assert.match(installedClaudeMd, /--gpt-model <sol\|luna\|terra>/);
+    assert.match(installedClaudeMd, /claudexsolxhigh/);
+    assert.match(installedClaudeMd, /claudexlunamaxfast/);
+    assert.match(installedClaudeMd, /claudexterraultrafast/);
+    assert.doesNotMatch(installedClaudeMd, /`claudex(?:High|Xhigh|Max|Ultra)(?:Fast)?`/);
     assert.match(installedClaudeMd, /# Following section/);
     assert.doesNotMatch(installedClaudeMd, /- old rule/);
 
@@ -319,6 +379,7 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     assert.doesNotMatch(installedProfile, /claudex\s*\(\)\s*\{/);
     assert.match(installedProfile, /cc-portable-bootstrap PATH/);
     assert.ok(claudexInstalled(claudeDir));
+    assertClaudexShortcutInstall(claudeDir);
 
     // The status line is installed by the same run; there is no second installer.
     const statuslineDir = path.join(claudeDir, 'cc-portable-bootstrap');
@@ -402,6 +463,136 @@ test('dry-run writes no files, backups, or MCP configuration', () => {
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(SECRET_SENTINEL));
   } finally {
     cleanupSandbox(sandbox);
+  }
+});
+
+test('legacy tier-only shortcuts are dry-run safe, exactly deleted, modified-preserved, idempotent, and restorable', () => {
+  const sandbox = fixtureSandbox('legacy-shortcuts');
+  try {
+    createSecret(sandbox.home);
+    const claudeDir = path.join(sandbox.home, '.claude');
+    const binDir = path.join(claudeDir, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+
+    const exactShortcut = { name: 'claudexhigh', args: ['--effort', 'high'] };
+    const modifiedShortcut = { name: 'claudexmaxfast', args: ['--effort', 'max', '--fast'] };
+    const exactPath = path.join(binDir, claudexShortcutFile(exactShortcut.name));
+    const modifiedPath = path.join(binDir, claudexShortcutFile(modifiedShortcut.name));
+    const nonFilePath = path.join(binDir, claudexShortcutFile('claudexultra'));
+    const exactContent = claudexShortcutContent(exactShortcut);
+    const modifiedContent = claudexShortcutContent(modifiedShortcut)
+      + (process.platform === 'win32' ? 'rem user modification\r\n' : '# user modification\n');
+    fs.writeFileSync(exactPath, exactContent, { mode: 0o700 });
+    fs.writeFileSync(modifiedPath, modifiedContent, { mode: 0o700 });
+    fs.mkdirSync(nonFilePath);
+
+    const commonArgs = [
+      '--codex', sandbox.codex,
+      '--no-profile',
+      '--no-statusline',
+    ];
+    const dryRun = runBootstrap(sandbox, 'setup', [...commonArgs, '--dry-run']);
+    assert.equal(dryRun.status, 0, dryRun.stderr || dryRun.stdout);
+    assert.match(dryRun.stdout, /remove: .*claudexhigh.*obsolete claudexhigh shortcut/s);
+    assert.match(dryRun.stdout, /obsolete claudex shortcut was preserved because its content was modified: .*claudexmaxfast/s);
+    assert.match(dryRun.stdout, /obsolete claudex shortcut was preserved because it is not a regular managed file: .*claudexultra/s);
+    assert.equal(fs.readFileSync(exactPath, 'utf8'), exactContent);
+    assert.equal(fs.readFileSync(modifiedPath, 'utf8'), modifiedContent);
+    assert.equal(fs.statSync(nonFilePath).isDirectory(), true);
+    assert.deepEqual(backupIds(sandbox.home), []);
+    assert.equal(stateOf(sandbox).mcp.present, false);
+
+    const installed = runBootstrap(sandbox, 'setup', [...commonArgs, '--yes']);
+    assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+    assert.equal(fs.existsSync(exactPath), false);
+    assert.equal(fs.readFileSync(modifiedPath, 'utf8'), modifiedContent);
+    assert.equal(fs.statSync(nonFilePath).isDirectory(), true);
+    assert.ok(claudexInstalled(claudeDir));
+    assert.equal(
+      fs.readFileSync(path.join(binDir, claudexShortcutFile('claudexlunamaxfast')), 'utf8'),
+      claudexShortcutContent({
+        name: 'claudexlunamaxfast',
+        args: ['--gpt-model', 'luna', '--effort', 'max', '--fast'],
+      }),
+    );
+    assert.match(installed.stdout, /obsolete claudex shortcut was preserved because its content was modified: .*claudexmaxfast/s);
+    const setupBackups = backupIds(sandbox.home);
+    assert.equal(setupBackups.length, 1);
+
+    const repeated = runBootstrap(sandbox, 'setup', [...commonArgs, '--yes']);
+    assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+    assert.match(repeated.stdout, /already current/);
+    assert.deepEqual(backupIds(sandbox.home), setupBackups);
+    assert.equal(fs.readFileSync(modifiedPath, 'utf8'), modifiedContent);
+    assert.equal(fs.statSync(nonFilePath).isDirectory(), true);
+
+    const manuallyRemoved = stateOf(sandbox);
+    manuallyRemoved.mcp = { present: false };
+    fs.writeFileSync(sandbox.state, JSON.stringify(manuallyRemoved, null, 2));
+    const restored = runBootstrap(sandbox, 'restore', ['--yes']);
+    assert.equal(restored.status, 0, restored.stderr || restored.stdout);
+    assert.equal(fs.readFileSync(exactPath, 'utf8'), exactContent);
+    assert.equal(fs.readFileSync(modifiedPath, 'utf8'), modifiedContent);
+    assert.equal(fs.statSync(nonFilePath).isDirectory(), true);
+    assert.ok(claudexAbsent(claudeDir));
+    assert.equal(stateOf(sandbox).mcp.present, false);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test('legacy shortcut inspection preserves symlinks and paths through symlinked parents', {
+  skip: process.platform === 'win32',
+}, () => {
+  const direct = fixtureSandbox('legacy-shortcut-symlink');
+  try {
+    createSecret(direct.home);
+    const binDir = path.join(direct.home, '.claude', 'bin');
+    const target = path.join(direct.home, 'custom-claudexhigh');
+    const shortcut = { name: 'claudexhigh', args: ['--effort', 'high'] };
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(target, claudexShortcutContent(shortcut), { mode: 0o700 });
+    const link = path.join(binDir, shortcut.name);
+    fs.symlinkSync(target, link);
+
+    const checked = runBootstrap(direct, 'check', [
+      '--codex', direct.codex,
+      '--no-profile',
+      '--no-statusline',
+    ]);
+    assert.equal(checked.status, 2, checked.stderr || checked.stdout);
+    assert.match(checked.stdout, /not a regular managed file: .*claudexhigh/s);
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+    assert.equal(fs.readFileSync(target, 'utf8'), claudexShortcutContent(shortcut));
+  } finally {
+    cleanupSandbox(direct);
+  }
+
+  const throughParent = fixtureSandbox('legacy-shortcut-parent-symlink');
+  try {
+    createSecret(throughParent.home);
+    const claudeDir = path.join(throughParent.home, '.claude');
+    const realBin = path.join(throughParent.home, 'real-bin');
+    const logicalBin = path.join(claudeDir, 'bin');
+    const shortcut = { name: 'claudexmax', args: ['--effort', 'max'] };
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.mkdirSync(realBin, { recursive: true });
+    fs.writeFileSync(path.join(realBin, shortcut.name), claudexShortcutContent(shortcut), { mode: 0o700 });
+    fs.symlinkSync(realBin, logicalBin);
+
+    const checked = runBootstrap(throughParent, 'check', [
+      '--codex', throughParent.codex,
+      '--no-profile',
+      '--no-statusline',
+    ]);
+    assert.equal(checked.status, 2, checked.stderr || checked.stdout);
+    assert.match(checked.stdout, /path resolves through a symlink: .*claudexmax/s);
+    assert.equal(
+      fs.readFileSync(path.join(realBin, shortcut.name), 'utf8'),
+      claudexShortcutContent(shortcut),
+    );
+  } finally {
+    cleanupSandbox(throughParent);
   }
 });
 
@@ -509,6 +700,52 @@ test('upgrading from predecessor markers rewrites them instead of duplicating', 
   } finally {
     cleanupSandbox(sandbox);
   }
+});
+
+test('managed block removes the recognized legacy CodexDev alias section and rejects altered copies', () => {
+  const legacyAliasSection = [
+    '# CodexDev / CodexDevFast 触发词（用户自定义，非 managed block）',
+    '',
+    '- `CodexDev` 是上方 managed block 的触发词别名。',
+    '- `CodexDevFast` = CodexDev 加上 Fast 请求。',
+    '- Fast 通过 service_tier 传递。',
+    '- effort 值来自 gpt-5.6-sol catalog。',
+  ].join('\n');
+  const original = [
+    '# Keep before',
+    '',
+    CODEX_BEGIN,
+    '# stale managed body',
+    CODEX_END,
+    '',
+    legacyAliasSection,
+    '',
+    '# Keep after',
+    '',
+    'Still here.',
+    '',
+  ].join('\n');
+  const replacement = '# Claude 调度 + Codex 实现模式\n\n- current model-aware rules';
+
+  const updated = updateCodexManagedBlock(original, replacement);
+  assert.match(updated, /current model-aware rules/);
+  assert.match(updated, /# Keep before/);
+  assert.match(updated, /# Keep after/);
+  assert.match(updated, /Still here\./);
+  assert.doesNotMatch(updated, /CodexDev \/ CodexDevFast 触发词/);
+  assert.doesNotMatch(updated, /gpt-5\.6-sol catalog/);
+
+  const altered = original.replace('Fast 通过 service_tier 传递。', 'Fast 通过其他字段传递。');
+  assert.throws(
+    () => updateCodexManagedBlock(altered, replacement),
+    /Unrecognized legacy CodexDev alias section/,
+  );
+
+  const duplicated = original.replace('# Keep after', `${legacyAliasSection}\n\n# Keep after`);
+  assert.throws(
+    () => updateCodexManagedBlock(duplicated, replacement),
+    /Duplicate legacy CodexDev alias sections/,
+  );
 });
 
 test('a file carrying both current and predecessor markers fails closed', () => {
@@ -1041,14 +1278,21 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     assert.match(check.stdout, /localhost fallback endpoint returned HTTP 2xx/);
     assert.match(check.stdout, /ANTHROPIC_API_KEY will be removed/);
     assert.match(check.stdout, /Fast mode available via --fast/);
+    assert.match(check.stdout, /GPT model=sol, reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
     assert.doesNotMatch(`${check.stdout}${check.stderr}`, new RegExp(SECRET_SENTINEL));
     assert.equal(fs.existsSync(launchRecord), false);
 
-    const launched = await runAsync(launcher, ['--model', 'gpt-5.6-sol', '--print', 'hello'], { env: commonEnv });
+    // A native Claude --model flag starts the passthrough tail. claudex still
+    // supplies its own Sol+xhigh default first and forwards the native flag intact.
+    const launched = await runAsync(
+      launcher,
+      ['--model', 'claude-opus-4-6', '--print', 'hello'],
+      { env: commonEnv },
+    );
     assert.equal(launched.status, 0, launched.stderr || launched.stdout);
     const record = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
     assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
-    assert.deepEqual(record.args.slice(4), ['--model', 'gpt-5.6-sol', '--print', 'hello']);
+    assert.deepEqual(record.args.slice(4), ['--model', 'claude-opus-4-6', '--print', 'hello']);
     assert.equal(record.baseUrl, fallback.url);
     assert.equal(record.authPresent, true);
     assert.equal(record.apiKeyPresent, false);
@@ -1074,24 +1318,40 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     assert.match(fastCheck.stdout, /Fast mode enabled \(request speed=fast\)/);
     assert.match(fastCheck.stdout, /reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
 
-    const effortLaunch = await runAsync(
+    const lunaLaunch = await runAsync(
       launcher,
-      ['--effort', 'ultra', '--fast', '--print', 'hello effort'],
+      ['--gpt-model', 'luna', '--effort', 'max', '--print', 'hello luna'],
       { env: commonEnv },
     );
-    assert.equal(effortLaunch.status, 0, effortLaunch.stderr || effortLaunch.stdout);
-    const effortRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
-    assert.deepEqual(effortRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(ultra)[1m]']);
-    assert.deepEqual(effortRecord.args.slice(4), ['--print', 'hello effort']);
-    assert.equal(effortRecord.subagentModel, 'gpt-5.6-sol(ultra)');
-    assert.deepEqual(JSON.parse(effortRecord.extraBody), {
+    assert.equal(lunaLaunch.status, 0, lunaLaunch.stderr || lunaLaunch.stdout);
+    const lunaRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(lunaRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-luna(max)[1m]']);
+    assert.deepEqual(lunaRecord.args.slice(4), ['--print', 'hello luna']);
+    assert.equal(lunaRecord.subagentModel, 'gpt-5.6-luna(max)');
+    assert.equal(lunaRecord.extraBody, commonEnv.CLAUDE_CODE_EXTRA_BODY);
+
+    const terraFastLaunch = await runAsync(
+      launcher,
+      ['--gpt-model', 'terra', '--effort', 'ultra', '--fast', '--print', 'hello terra fast'],
+      { env: commonEnv },
+    );
+    assert.equal(terraFastLaunch.status, 0, terraFastLaunch.stderr || terraFastLaunch.stdout);
+    const terraFastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(terraFastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-terra(ultra)[1m]']);
+    assert.deepEqual(terraFastRecord.args.slice(4), ['--print', 'hello terra fast']);
+    assert.equal(terraFastRecord.subagentModel, 'gpt-5.6-terra(ultra)');
+    assert.deepEqual(JSON.parse(terraFastRecord.extraBody), {
       metadata: { source: 'test' },
       speed: 'fast',
     });
 
-    const effortCheck = await runAsync(launcher, ['--effort', 'max', '--check'], { env: commonEnv });
-    assert.equal(effortCheck.status, 0, effortCheck.stderr || effortCheck.stdout);
-    assert.match(effortCheck.stdout, /reasoning effort=max \(model gpt-5\.6-sol\(max\)\[1m\]\)/);
+    const modelCheck = await runAsync(
+      launcher,
+      ['--gpt-model', 'luna', '--effort', 'high', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(modelCheck.status, 0, modelCheck.stderr || modelCheck.stdout);
+    assert.match(modelCheck.stdout, /GPT model=luna, reasoning effort=high \(model gpt-5\.6-luna\(high\)\[1m\]\)/);
 
     const invalidEffort = await runAsync(launcher, ['--effort', 'turbo', '--print', 'must not launch'], { env: commonEnv });
     assert.equal(invalidEffort.status, 1);
@@ -1100,6 +1360,22 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     const missingEffortValue = await runAsync(launcher, ['--effort'], { env: commonEnv });
     assert.equal(missingEffortValue.status, 1);
     assert.match(missingEffortValue.stderr, /--effort requires a value/);
+
+    const invalidModel = await runAsync(launcher, ['--gpt-model', 'mars', '--check'], { env: commonEnv });
+    assert.equal(invalidModel.status, 1);
+    assert.match(invalidModel.stderr, /invalid --gpt-model value mars/);
+
+    const missingModelValue = await runAsync(launcher, ['--gpt-model'], { env: commonEnv });
+    assert.equal(missingModelValue.status, 1);
+    assert.match(missingModelValue.stderr, /--gpt-model requires a value/);
+
+    const lunaUltra = await runAsync(
+      launcher,
+      ['--gpt-model', 'luna', '--effort', 'ultra', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(lunaUltra.status, 1);
+    assert.match(lunaUltra.stderr, /gpt-5\.6-luna does not support effort ultra/);
 
     const malformedFast = await runAsync(launcher, ['--fast', '--print', 'must not launch'], {
       env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: '[]' },
@@ -1138,7 +1414,7 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
   }
 });
 
-test('Windows claudex Fast mode merges extra body without forwarding launcher flags', {
+test('Windows claudex selects models, merges Fast body, validates launcher flags, and passes native Claude args', {
   skip: process.platform !== 'win32',
 }, async () => {
   const sandbox = fixtureSandbox('claudex-windows-fast');
@@ -1177,17 +1453,29 @@ test('Windows claudex Fast mode merges extra body without forwarding launcher fl
   ];
 
   try {
-    const launched = await runAsync(
+    const defaultLaunch = await runAsync(
+      powershell,
+      [...launcherArgs, '--model', 'claude-opus-4-6', '--print', 'hello default'],
+      { env: commonEnv },
+    );
+    assert.equal(defaultLaunch.status, 0, defaultLaunch.stderr || defaultLaunch.stdout);
+    const defaultRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(defaultRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
+    assert.deepEqual(defaultRecord.args.slice(4), ['--model', 'claude-opus-4-6', '--print', 'hello default']);
+    assert.equal(defaultRecord.subagentModel, 'gpt-5.6-sol(xhigh)');
+    assert.equal(defaultRecord.extraBody, commonEnv.CLAUDE_CODE_EXTRA_BODY);
+
+    const fastLaunch = await runAsync(
       powershell,
       [...launcherArgs, '--fast', '--print', 'hello fast'],
       { env: commonEnv },
     );
-    assert.equal(launched.status, 0, launched.stderr || launched.stdout);
-    const record = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
-    assert.deepEqual(record.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
-    assert.deepEqual(record.args.slice(4), ['--print', 'hello fast']);
-    assert.equal(record.apiKeyPresent, false);
-    assert.deepEqual(JSON.parse(record.extraBody), {
+    assert.equal(fastLaunch.status, 0, fastLaunch.stderr || fastLaunch.stdout);
+    const fastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(fastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
+    assert.deepEqual(fastRecord.args.slice(4), ['--print', 'hello fast']);
+    assert.equal(fastRecord.apiKeyPresent, false);
+    assert.deepEqual(JSON.parse(fastRecord.extraBody), {
       metadata: { source: 'test' },
       speed: 'fast',
     });
@@ -1199,16 +1487,34 @@ test('Windows claudex Fast mode merges extra body without forwarding launcher fl
     );
     assert.equal(check.status, 0, check.stderr || check.stdout);
     assert.match(check.stdout, /Fast mode enabled \(request speed=fast\)/);
+    assert.match(check.stdout, /GPT model=sol, reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
 
-    const effortLaunch = await runAsync(
+    const lunaLaunch = await runAsync(
       powershell,
-      [...launcherArgs, '--effort', 'ultra', '--print', 'hello effort'],
+      [...launcherArgs, '--gpt-model', 'luna', '--effort', 'max', '--print', 'hello luna'],
       { env: commonEnv },
     );
-    assert.equal(effortLaunch.status, 0, effortLaunch.stderr || effortLaunch.stdout);
-    const effortRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
-    assert.deepEqual(effortRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(ultra)[1m]']);
-    assert.deepEqual(effortRecord.args.slice(4), ['--print', 'hello effort']);
+    assert.equal(lunaLaunch.status, 0, lunaLaunch.stderr || lunaLaunch.stdout);
+    const lunaRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(lunaRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-luna(max)[1m]']);
+    assert.deepEqual(lunaRecord.args.slice(4), ['--print', 'hello luna']);
+    assert.equal(lunaRecord.subagentModel, 'gpt-5.6-luna(max)');
+    assert.equal(lunaRecord.extraBody, commonEnv.CLAUDE_CODE_EXTRA_BODY);
+
+    const terraFastLaunch = await runAsync(
+      powershell,
+      [...launcherArgs, '--gpt-model', 'terra', '--effort', 'ultra', '--fast', '--print', 'hello terra fast'],
+      { env: commonEnv },
+    );
+    assert.equal(terraFastLaunch.status, 0, terraFastLaunch.stderr || terraFastLaunch.stdout);
+    const terraFastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(terraFastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-terra(ultra)[1m]']);
+    assert.deepEqual(terraFastRecord.args.slice(4), ['--print', 'hello terra fast']);
+    assert.equal(terraFastRecord.subagentModel, 'gpt-5.6-terra(ultra)');
+    assert.deepEqual(JSON.parse(terraFastRecord.extraBody), {
+      metadata: { source: 'test' },
+      speed: 'fast',
+    });
 
     const invalidEffort = await runAsync(
       powershell,
@@ -1217,6 +1523,30 @@ test('Windows claudex Fast mode merges extra body without forwarding launcher fl
     );
     assert.equal(invalidEffort.status, 1);
     assert.match(invalidEffort.stderr, /invalid --effort value/);
+
+    const invalidModel = await runAsync(
+      powershell,
+      [...launcherArgs, '--gpt-model', 'mars', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(invalidModel.status, 1);
+    assert.match(invalidModel.stderr, /invalid --gpt-model value mars/);
+
+    const missingModelValue = await runAsync(
+      powershell,
+      [...launcherArgs, '--gpt-model'],
+      { env: commonEnv },
+    );
+    assert.equal(missingModelValue.status, 1);
+    assert.match(missingModelValue.stderr, /--gpt-model requires a value/);
+
+    const lunaUltra = await runAsync(
+      powershell,
+      [...launcherArgs, '--gpt-model', 'luna', '--effort', 'ultra', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(lunaUltra.status, 1);
+    assert.match(lunaUltra.stderr, /gpt-5\.6-luna does not support effort ultra/);
 
     const malformed = await runAsync(
       powershell,
@@ -1242,10 +1572,18 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
   assert.match(psText, /AllowAutoRedirect\s*=\s*\$false/);
   assert.match(psText, /ANTHROPIC_API_KEY.*\$null/s);
   assert.match(psText, /ANTHROPIC_API_KEY will be removed/);
-  assert.match(psText, /gpt-5\.6-sol\(\$effort\)\[1m\]/);
+  assert.match(psText, /\$modelFamily = 'sol'/);
+  assert.match(psText, /\$effort = 'xhigh'/);
+  assert.match(psText, /\$argument -eq '--gpt-model'/);
   assert.match(psText, /\$argument -eq '--fast'/);
   assert.match(psText, /\$argument -eq '--effort'/);
-  assert.match(psText, /\$effort = 'xhigh'/);
+  assert.match(psText, /'sol' \{ \$modelId = 'gpt-5\.6-sol' \}/);
+  assert.match(psText, /'luna'.*gpt-5\.6-luna/s);
+  assert.match(psText, /'terra' \{ \$modelId = 'gpt-5\.6-terra' \}/);
+  assert.match(psText, /\$mainModel = "\$modelId\(\$effort\)\[1m\]"/);
+  assert.match(psText, /gpt-5\.6-luna does not support effort ultra/);
+  assert.match(psText, /--gpt-model requires a value/);
+  assert.match(psText, /invalid --gpt-model value/);
   assert.match(psText, /CLAUDE_CODE_EXTRA_BODY/);
   assert.match(psText, /\$body\['speed'\] = 'fast'/);
   assert.match(psText, /Fast mode enabled \(request speed=fast\)/);
