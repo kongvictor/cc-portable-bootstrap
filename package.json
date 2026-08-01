@@ -1,6 +1,6 @@
 {
   "name": "cc-portable-bootstrap",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check core/bootstrap.mjs && node --check core/statusline/runtime.mjs && node --check core/statusline/configure.mjs && node --check core/statusline/snapshot.mjs",
+    "check": "node --check core/bootstrap.mjs && node --check core/statusline/runtime.mjs && node --check core/statusline/configure.mjs && node --check core/statusline/snapshot.mjs && node --check templates/claudex-exec.mjs",
     "check:posix": "sh -n scripts/setup-posix.sh && sh -n templates/claudex.sh && sh -n bin/statusline"
   }
 }

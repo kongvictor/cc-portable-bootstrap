@@ -9,7 +9,7 @@ description: 安装或检查可移植 Claude Code agent 环境（Codex MCP、工
 1. 先运行 `check`，把缺失项报告给用户。
 2. 运行 `setup --dry-run`，列出将写入的路径和 MCP 动作，不显示文件 diff 或任何 secret。
 3. 用户确认后运行 `setup --yes`。
-4. 复验：再次 `check`，运行默认 `claudex --check`，再运行 `claudex --gpt-model terra --effort ultra --fast --check` 验证非默认组合，并确认 `settings.json` 的 `statusLine` 指向 `~/.claude/cc-portable-bootstrap/` 下的稳定 launcher。
+4. 复验：再次 `check`；运行 `claudex --check` 验证 fresh Standard，运行 `claudex --fast --check` 验证 explicit Fast，再在 Fast marker/body 环境下运行 `claudex --standard --check` 验证 override；最后确认 `settings.json` 的 `statusLine` 指向 `~/.claude/cc-portable-bootstrap/` 下的稳定 launcher。
 
 平台入口：
 

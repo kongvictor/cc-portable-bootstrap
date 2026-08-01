@@ -7,7 +7,7 @@ One `setup` provisions the whole environment:
 1. **Dependencies** — installs the Codex CLI and, when this host needs one, [cliproxyapi](https://github.com/router-for-me/CLIProxyAPI), plus the required Claude Code plugins.
 2. **Codex MCP** — registers a stable Codex binary as a user-scope MCP server using `codex --sandbox workspace-write --ask-for-approval never mcp-server`, so Claude can delegate implementation to Codex with safe defaults.
 3. **Working modes** — installs 22 model-aware *Claude orchestrates / Codex implements* triggers into your user `CLAUDE.md`: `Codex<Model><Effort>[Fast]` selects Sol, Luna, or Terra plus `high`, `xhigh`, `max`, or supported `ultra` reasoning.
-4. **`claudex`** — a launcher that runs Claude Code against GPT-5.6 Sol/Luna/Terra through a local or tunnelled proxy, with a fail-closed health check, model-aware reasoning tiers, matching shortcuts, and an opt-in Codex Fast tier.
+4. **`claudex`** — a launcher that runs Claude Code against GPT-5.6 Sol/Luna/Terra through a local or tunnelled proxy, with a fail-closed health check, model-aware reasoning tiers, matching shortcuts, and inherited Fast defaults for downstream Codex/claudex delegation.
 5. **Statusline** — a Node runtime layered on [claude-hud](https://github.com/jarrodwatts/claude-hud) that rescales GPT/Codex context to its real window, always shows input/cache tokens, appends official Claude/ChatGPT quota, and marks Fast-tier sessions.
 6. **Autostart** — keeps a local proxy running across reboots (launchd / systemd --user / a logon scheduled task on Windows).
 
@@ -27,7 +27,8 @@ Signing in is interactive upstream — Codex uses a ChatGPT OAuth flow, cliproxy
 - Luna: `gpt-5.6-luna`, efforts `high|xhigh|max` (no Ultra)
 - Terra: `gpt-5.6-terra`, efforts `high|xhigh|max|ultra`
 - Every valid pair has standard and `Fast` prompt triggers. Codex triggers use `Codex<Model><Effort>[Fast]`; claudex triggers and shortcuts use `claudex<Model><Effort>[Fast]`.
-- Bare `claudex` defaults to Sol+xhigh. `claudexfast` defaults to Sol+xhigh+Fast. Direct selection uses `claudex --gpt-model sol|luna|terra --effort high|xhigh|max|ultra [--fast]`.
+- Bare `claudex` defaults to Sol+xhigh and inherits a Fast parent session when nested. `claudexfast` selects Sol+xhigh+Fast. Direct selection uses `claudex --gpt-model sol|luna|terra --effort high|xhigh|max|ultra [--fast|--standard]`.
+- A Fast claudex session defaults generic Codex MCP and bare nested claudex delegation to Fast. Explicit non-Fast trigger names override that default and use Standard; explicit Fast names always use Fast. This policy does not add a new tier rule for Claude Code built-in Agent subagents.
 
 ## Install
 
@@ -75,7 +76,7 @@ scripts/setup-posix.sh uninstall --yes
 - Existing configuration is merged, never clobbered. A statusLine this installer does not recognise is left alone unless you pass `--force`.
 - Codex MCP is **never** removed or replaced automatically: the Claude CLI has no compare-and-swap remove, so a conflicting definition is reported for manual handling instead of risking the deletion of a concurrently registered server.
 - `claudex` strips any inherited `ANTHROPIC_API_KEY` before launching Claude Code, so the proxy sees exactly one credential.
-- `claudex --gpt-model <sol|luna|terra> --effort <tier> [--fast]` selects the exact GPT-5.6 model and supported reasoning tier. Fast injects `speed: "fast"` into Claude Code's request body; current CLIProxyAPI translates that to Codex's priority/Fast service tier. Use `--check` to verify selection without starting a session. Launcher-only flags must come before any Claude Code arguments. This remains separate from Claude Code's in-session `/fast`, which selects Anthropic's native Fast model path.
+- `claudex --gpt-model <sol|luna|terra> --effort <tier> [--fast|--standard]` selects the exact GPT-5.6 model, reasoning tier, and optional explicit transport tier. Fast preserves the existing request-body object, injects `speed: "fast"`, sets a process-only inheritance marker, and appends a fixed downstream-delegation policy. `--standard` removes only top-level `speed`, preserves other fields, and clears inherited Fast. Launcher-only flags must precede Claude arguments; the last `--fast`/`--standard` wins. This remains separate from Claude Code's in-session `/fast`.
 
 ## Development
 

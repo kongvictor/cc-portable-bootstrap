@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0
+
+Propagates a Fast claudex session's default to downstream Codex MCP and nested claudex delegation while preserving explicit Standard overrides.
+
+### Added
+
+- `CLAUDEX_DELEGATION_TIER=fast` as a process-only inheritance marker and a fixed `--append-system-prompt` policy that tells the coordinator how to select downstream Fast without exposing request-body or credential data.
+- `claudex --standard`, which clears inherited Fast by removing only the top-level request-body `speed` field and preserving all other JSON object fields.
+- A bundled Node launch helper that safely merges user `--append-system-prompt` values with the Fast policy and preserves native Claude arguments.
+
+### Changed
+
+- Bare nested claudex inherits a Fast parent; model-specific non-Fast shortcuts now pass `--standard`, while Fast shortcuts pass `--fast`.
+- Generic Codex delegation in a Fast claudex session defaults to `config.service_tier="fast"`. Explicit non-Fast Codex triggers still omit it, and explicit Fast triggers still require it.
+- `claudex --check` reports the effective delegation tier and whether it was explicit, inherited, or default.
+- Windows CMD launchers now encode native Claude arguments before entering PowerShell, preventing short flags such as `-p` from colliding with PowerShell common parameters. Batch-shim invocation also preserves literal `%NAME%` arguments without expanding them into environment values.
+- Fast/Standard request-body edits now use case-sensitive JSON semantics, so unrelated keys such as `Speed` remain untouched.
+
 ## 1.2.0
 
 Adds explicit GPT-5.6 model selection to both delegation paths and removes the old model-implicit trigger and shortcut names.

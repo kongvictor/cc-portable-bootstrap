@@ -8,7 +8,7 @@ KEY_FILE=${CLAUDEX_API_KEY_FILE:-"$HOME/.secrets/cliproxy_apikey"}
 PREFERRED_URL=${CLIPROXY_URL:-http://127.0.0.1:8317}
 FALLBACK_URL=${CLAUDEX_FALLBACK_URL:-http://127.0.0.1:8317}
 CHECK_ONLY=0
-FAST_MODE=0
+TIER_REQUEST='inherit'
 MODEL_FAMILY='sol'
 EFFORT='xhigh'
 
@@ -19,7 +19,11 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --fast)
-      FAST_MODE=1
+      TIER_REQUEST='fast'
+      shift
+      ;;
+    --standard)
+      TIER_REQUEST='standard'
       shift
       ;;
     --gpt-model)
@@ -93,6 +97,63 @@ if [ "$node_major" -lt 18 ]; then
   exit 1
 fi
 
+if [ "$TIER_REQUEST" = 'fast' ]; then
+  EFFECTIVE_TIER='fast'
+  TIER_SOURCE='explicit'
+elif [ "$TIER_REQUEST" = 'standard' ]; then
+  EFFECTIVE_TIER='standard'
+  TIER_SOURCE='explicit'
+elif [ "${CLAUDEX_DELEGATION_TIER-}" = 'fast' ]; then
+  EFFECTIVE_TIER='fast'
+  TIER_SOURCE='inherited marker'
+elif "$NODE_BIN" <<'NODE' >/dev/null 2>&1
+const existing = process.env.CLAUDE_CODE_EXTRA_BODY;
+if (!existing) process.exit(1);
+try {
+  const body = JSON.parse(existing);
+  process.exit(body !== null && typeof body === 'object' && !Array.isArray(body) && body.speed === 'fast' ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+NODE
+then
+  EFFECTIVE_TIER='fast'
+  TIER_SOURCE='inherited request body'
+else
+  EFFECTIVE_TIER='standard'
+  TIER_SOURCE='default'
+fi
+
+UPDATED_EXTRA_BODY=''
+UPDATE_EXTRA_BODY=0
+if [ "$EFFECTIVE_TIER" = 'fast' ] || [ "$TIER_REQUEST" = 'standard' ]; then
+  if ! UPDATED_EXTRA_BODY=$("$NODE_BIN" - "$EFFECTIVE_TIER" <<'NODE'
+const tier = process.argv[2];
+const existing = process.env.CLAUDE_CODE_EXTRA_BODY;
+let body = {};
+if (existing) {
+  try {
+    body = JSON.parse(existing);
+  } catch {
+    process.exit(1);
+  }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) process.exit(1);
+}
+if (tier === 'fast') body.speed = 'fast';
+else delete body.speed;
+if (Object.keys(body).length) process.stdout.write(JSON.stringify(body));
+NODE
+  ); then
+    if [ "$TIER_REQUEST" = 'standard' ]; then
+      printf '%s\n' 'claudex: CLAUDE_CODE_EXTRA_BODY must be a JSON object when --standard is used' >&2
+    else
+      printf '%s\n' 'claudex: CLAUDE_CODE_EXTRA_BODY must be a JSON object when Fast is effective' >&2
+    fi
+    exit 1
+  fi
+  UPDATE_EXTRA_BODY=1
+fi
+
 if [ ! -f "$KEY_FILE" ] || [ ! -s "$KEY_FILE" ]; then
   printf '%s\n' 'claudex: secret file is missing or empty; create ~/.secrets/cliproxy_apikey yourself' >&2
   exit 1
@@ -149,28 +210,11 @@ if ! command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
   printf '%s\n' 'claudex: Claude executable not found' >&2
   exit 1
 fi
-
-fast_extra_body=''
-if [ "$FAST_MODE" -eq 1 ]; then
-  if ! fast_extra_body=$("$NODE_BIN" <<'NODE'
-let body = {};
-const existing = process.env.CLAUDE_CODE_EXTRA_BODY;
-if (existing) {
-  try {
-    const parsed = JSON.parse(existing);
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) process.exit(1);
-    body = parsed;
-  } catch {
-    process.exit(1);
-  }
-}
-body.speed = 'fast';
-process.stdout.write(JSON.stringify(body));
-NODE
-  ); then
-    printf '%s\n' 'claudex: CLAUDE_CODE_EXTRA_BODY must be a JSON object when --fast is used' >&2
-    exit 1
-  fi
+SCRIPT_DIR=$(CDPATH= cd -P -- "$(dirname "$0")" && pwd)
+EXEC_HELPER="$SCRIPT_DIR/claudex-exec.mjs"
+if [ ! -f "$EXEC_HELPER" ]; then
+  printf '%s\n' 'claudex: claudex-exec.mjs is missing; rerun bootstrap setup' >&2
+  exit 1
 fi
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
@@ -178,8 +222,9 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
   printf 'claudex check: %s endpoint returned HTTP 2xx\n' "$selected_label"
   printf '%s\n' 'claudex check: Claude executable found'
   printf '%s\n' 'claudex check: inherited ANTHROPIC_API_KEY will be removed before launch'
-  if [ "$FAST_MODE" -eq 1 ]; then
-    printf '%s\n' 'claudex check: Fast mode enabled (request speed=fast)'
+  printf 'claudex check: delegation tier=%s (%s)\n' "$EFFECTIVE_TIER" "$TIER_SOURCE"
+  if [ "$EFFECTIVE_TIER" = 'fast' ]; then
+    printf '%s\n' 'claudex check: Fast mode enabled (request speed=fast, downstream delegation defaults Fast)'
   else
     printf '%s\n' 'claudex check: Fast mode available via --fast'
   fi
@@ -198,12 +243,21 @@ NODE
 unset ANTHROPIC_API_KEY
 export ANTHROPIC_BASE_URL=$selected_url
 export ANTHROPIC_AUTH_TOKEN=$api_key
-if [ "$FAST_MODE" -eq 1 ]; then
-  export CLAUDE_CODE_EXTRA_BODY=$fast_extra_body
+if [ "$UPDATE_EXTRA_BODY" -eq 1 ]; then
+  if [ -n "$UPDATED_EXTRA_BODY" ]; then
+    export CLAUDE_CODE_EXTRA_BODY=$UPDATED_EXTRA_BODY
+  else
+    unset CLAUDE_CODE_EXTRA_BODY
+  fi
+fi
+if [ "$EFFECTIVE_TIER" = 'fast' ]; then
+  export CLAUDEX_DELEGATION_TIER='fast'
+else
+  unset CLAUDEX_DELEGATION_TIER
 fi
 export CLAUDE_CODE_SUBAGENT_MODEL=$SUBAGENT_MODEL
 export CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY='3'
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW='360000'
 export ENABLE_TOOL_SEARCH='false'
 
-exec "$CLAUDE_BIN" --permission-mode auto --model "$MAIN_MODEL" "$@"
+exec "$NODE_BIN" "$EXEC_HELPER" "$CLAUDE_BIN" "$MAIN_MODEL" "$@"

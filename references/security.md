@@ -2,6 +2,8 @@
 
 - Bootstrap checks the API key file with `stat` metadata only. It does not open it.
 - Installed claudex launchers read the key only at runtime, keep it in process memory, and never print it.
+- Fast inheritance uses only fixed, nonsecret state: process-local `CLAUDEX_DELEGATION_TIER=fast` plus a constant appended system policy. The marker is never persisted to settings, profiles, or MCP registration. Request-body contents, user system prompts, endpoints, and credentials are never interpolated into that policy or diagnostics.
+- `--standard` uses case-sensitive JSON semantics to remove only exact top-level `speed`; every other field is preserved. Malformed/non-object bodies fail closed instead of being discarded. Launcher argument handling uses arrays/positional arguments and the bundled Node helper; Windows command shims use tested quoting that keeps `%NAME%`, metacharacters, carets, exclamation marks, and quotes literal. No `eval` or temporary prompt files are used.
 - Before launching Claude, both POSIX and PowerShell launchers remove any inherited `ANTHROPIC_API_KEY` and inject only `ANTHROPIC_AUTH_TOKEN`, preventing dual auth headers on Claude Code 2.1.220+.
 - Health checks require a direct HTTP 2xx response (redirects are not followed) and do not print response bodies, headers, endpoint credentials, or the key.
 - Claude MCP child processes run without inherited `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_BASE_URL` values.

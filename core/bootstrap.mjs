@@ -773,7 +773,7 @@ function claudexShortcuts() {
     for (const effort of model.efforts) {
       const prefix = `claudex${model.name}${effort}`;
       const args = ['--gpt-model', model.name, '--effort', effort];
-      shortcuts.push({ name: prefix, args });
+      shortcuts.push({ name: prefix, args: [...args, '--standard'] });
       shortcuts.push({ name: `${prefix}fast`, args: [...args, '--fast'] });
     }
   }
@@ -828,6 +828,12 @@ function desiredFiles(options) {
         mode: 0o700,
         label: 'Windows claudex CMD shim',
       },
+      {
+        path: managedTargetPath(path.join(binDir, 'claudex-exec.mjs'), options),
+        content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'claudex-exec.mjs'), 'utf8'),
+        mode: 0o700,
+        label: 'claudex argument and launch helper',
+      },
     );
     for (const shortcut of claudexShortcuts()) {
       files.push({
@@ -838,12 +844,20 @@ function desiredFiles(options) {
       });
     }
   } else {
-    files.push({
-      path: managedTargetPath(path.join(binDir, 'claudex'), options),
-      content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'claudex.sh'), 'utf8'),
-      mode: 0o700,
-      label: 'POSIX claudex launcher',
-    });
+    files.push(
+      {
+        path: managedTargetPath(path.join(binDir, 'claudex'), options),
+        content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'claudex.sh'), 'utf8'),
+        mode: 0o700,
+        label: 'POSIX claudex launcher',
+      },
+      {
+        path: managedTargetPath(path.join(binDir, 'claudex-exec.mjs'), options),
+        content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'claudex-exec.mjs'), 'utf8'),
+        mode: 0o700,
+        label: 'claudex argument and launch helper',
+      },
+    );
     for (const shortcut of claudexShortcuts()) {
       files.push({
         path: managedTargetPath(path.join(binDir, shortcut.name), options),

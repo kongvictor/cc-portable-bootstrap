@@ -7,6 +7,12 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
+  FAST_POLICY,
+  hasFastExtraBody,
+  mergeFastPolicy,
+  updateExtraBody,
+} from '../templates/claudex-exec.mjs';
+import {
   CODEX_MCP_ARGS,
   CODEX_BEGIN,
   CODEX_END,
@@ -192,7 +198,9 @@ if (launchFile) {
     concurrency: process.env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY,
     compactWindow: process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     toolSearch: process.env.ENABLE_TOOL_SEARCH,
+    extraBodyPresent: Object.prototype.hasOwnProperty.call(process.env, 'CLAUDE_CODE_EXTRA_BODY'),
     extraBody: process.env.CLAUDE_CODE_EXTRA_BODY,
+    delegationTier: process.env.CLAUDEX_DELEGATION_TIER,
     inheritedMarker: process.env.CURRENT_ENV_MARKER,
   }, null, 2));
 }
@@ -214,7 +222,7 @@ const CLAUDEX_MODEL_SHORTCUTS = CLAUDEX_MODELS.flatMap((model) => (
     const name = `claudex${model.name}${effort}`;
     const args = ['--gpt-model', model.name, '--effort', effort];
     return [
-      { name, args },
+      { name, args: [...args, '--standard'] },
       { name: `${name}fast`, args: [...args, '--fast'] },
     ];
   })
@@ -231,8 +239,8 @@ const CODEX_TRIGGERS = CLAUDEX_MODELS.flatMap((model) => (
 ));
 const CLAUDEX_SHORTCUT_NAMES = CLAUDEX_SHORTCUTS.map(({ name }) => name);
 const CLAUDEX_LAUNCHERS = process.platform === 'win32'
-  ? ['claudex.ps1', 'claudex.cmd', ...CLAUDEX_SHORTCUT_NAMES.map((name) => `${name}.cmd`)]
-  : ['claudex', ...CLAUDEX_SHORTCUT_NAMES];
+  ? ['claudex.ps1', 'claudex.cmd', 'claudex-exec.mjs', ...CLAUDEX_SHORTCUT_NAMES.map((name) => `${name}.cmd`)]
+  : ['claudex', 'claudex-exec.mjs', ...CLAUDEX_SHORTCUT_NAMES];
 
 function claudexShortcutFile(name) {
   return process.platform === 'win32' ? `${name}.cmd` : name;
@@ -245,6 +253,50 @@ function claudexShortcutContent(shortcut) {
       + 'exit /b %ERRORLEVEL%\r\n'
     : '#!/bin/sh\n'
       + `exec "$(dirname "$0")/claudex" ${shortcut.args.join(' ')} "$@"\n`;
+}
+
+function optionValues(args, name) {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--') break;
+    if (args[index] === name) {
+      values.push(args[index + 1]);
+      index += 1;
+    } else if (args[index].startsWith(`${name}=`)) {
+      values.push(args[index].slice(name.length + 1));
+    }
+  }
+  return values;
+}
+
+function withoutOption(args, name) {
+  const filtered = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--') {
+      filtered.push(...args.slice(index));
+      break;
+    }
+    if (args[index] === name) {
+      index += 1;
+    } else if (!args[index].startsWith(`${name}=`)) {
+      filtered.push(args[index]);
+    }
+  }
+  return filtered;
+}
+
+function assertFastPolicy(args, userText = []) {
+  const prompts = optionValues(args, '--append-system-prompt');
+  assert.equal(prompts.length, 1);
+  let offset = 0;
+  for (const text of userText) {
+    const index = prompts[0].indexOf(text, offset);
+    assert.ok(index >= offset, `missing or out-of-order appended prompt: ${text}; actual=${JSON.stringify(prompts[0])}`);
+    offset = index + text.length;
+  }
+  assert.match(prompts[0], /generic or otherwise tier-unspecified Codex MCP delegation/);
+  assert.match(prompts[0], /explicit non-Fast claudex<Model><Effort> triggers must use --standard/);
+  assert.match(prompts[0], /built-in Agent subagents/);
 }
 
 function claudexInstalled(claudeDir) {
@@ -260,6 +312,15 @@ function assertClaudexShortcutInstall(claudeDir) {
   for (const shortcut of CLAUDEX_SHORTCUTS) {
     const file = path.join(binDir, claudexShortcutFile(shortcut.name));
     assert.equal(fs.readFileSync(file, 'utf8'), claudexShortcutContent(shortcut));
+    if (shortcut.name !== 'claudexfast') {
+      if (shortcut.name.endsWith('fast')) {
+        assert.ok(shortcut.args.includes('--fast'));
+        assert.ok(!shortcut.args.includes('--standard'));
+      } else {
+        assert.ok(shortcut.args.includes('--standard'));
+        assert.ok(!shortcut.args.includes('--fast'));
+      }
+    }
   }
 }
 
@@ -360,17 +421,19 @@ test('setup is idempotent, migrates managed content, and restore rolls it back',
     assert.match(installedClaudeMd, /按最长的完整关键词匹配/);
     assert.match(installedClaudeMd, /codex --sandbox workspace-write --ask-for-approval never mcp-server/);
     assert.match(installedClaudeMd, /"service_tier": "fast"/);
-    assert.match(installedClaudeMd, /非 Fast 触发词不得传 `service_tier`/);
+    assert.match(installedClaudeMd, /完整非 Fast 触发词必须省略 `service_tier`/);
+    assert.match(installedClaudeMd, /通用或未明确 Fast\/Standard 的 Codex 委派才继承/);
+    assert.match(installedClaudeMd, /显式非 Fast 触发词必须用 .*--standard/s);
+    assert.match(installedClaudeMd, /通用或未指定 tier 的嵌套 claudex 委派不传/);
+    assert.match(installedClaudeMd, /不新增 Claude Code 内置 `Agent` 子代理/);
     assert.match(installedClaudeMd, /claudex 模型触发词共有 22 个/);
     assert.match(installedClaudeMd, /`claudexSolHigh`/);
     assert.match(installedClaudeMd, /`claudexLunaMax`/);
     assert.match(installedClaudeMd, /`claudexTerraUltra`/);
     assert.match(installedClaudeMd, /`claudexFast` 使用 Sol\+xhigh\+Fast/);
     assert.match(installedClaudeMd, /裸 `claudex` 为 Sol\+xhigh/);
-    assert.match(installedClaudeMd, /--gpt-model <sol\|luna\|terra>/);
-    assert.match(installedClaudeMd, /claudexsolxhigh/);
-    assert.match(installedClaudeMd, /claudexlunamaxfast/);
-    assert.match(installedClaudeMd, /claudexterraultrafast/);
+    assert.match(installedClaudeMd, /--gpt-model <model> --effort <effort> --standard/);
+    assert.match(installedClaudeMd, /非 Fast 快捷命令内置 `--standard`/);
     assert.doesNotMatch(installedClaudeMd, /`claudex(?:High|Xhigh|Max|Ultra)(?:Fast)?`/);
     assert.match(installedClaudeMd, /# Following section/);
     assert.doesNotMatch(installedClaudeMd, /- old rule/);
@@ -1233,6 +1296,43 @@ function runAsync(command, args, options) {
   });
 }
 
+test('claudex extra-body handling is case-sensitive and preserves unrelated fields', () => {
+  assert.equal(hasFastExtraBody('{"speed":"fast"}'), true);
+  assert.equal(hasFastExtraBody('{"Speed":"fast"}'), false);
+  assert.equal(hasFastExtraBody('not-json'), false);
+  assert.deepEqual(JSON.parse(updateExtraBody('{"Speed":"slow"}', 'fast')), {
+    Speed: 'slow',
+    speed: 'fast',
+  });
+  assert.deepEqual(JSON.parse(updateExtraBody('{"Speed":"slow","speed":"fast"}', 'standard')), {
+    Speed: 'slow',
+  });
+  assert.equal(updateExtraBody('{"speed":"fast"}', 'standard'), null);
+  assert.throws(() => updateExtraBody('[]', 'fast'), /JSON object/);
+});
+
+test('claudex Fast policy merges user append prompts without changing other arguments', () => {
+  const merged = mergeFastPolicy([
+    '--append-system-prompt', 'user policy one',
+    '--model', 'claude-opus-4-6',
+    '--append-system-prompt=user policy two',
+    '--print', 'hello',
+    '--', '--append-system-prompt', 'literal after delimiter',
+  ], (message) => { throw new Error(message); });
+  assert.deepEqual(optionValues(merged, '--append-system-prompt'), [
+    `user policy one\n\nuser policy two\n\n${FAST_POLICY}`,
+  ]);
+  assert.deepEqual(withoutOption(merged, '--append-system-prompt'), [
+    '--model', 'claude-opus-4-6',
+    '--print', 'hello',
+    '--', '--append-system-prompt', 'literal after delimiter',
+  ]);
+  assert.throws(
+    () => mergeFastPolicy(['--append-system-prompt'], (message) => { throw new Error(message); }),
+    /--append-system-prompt requires a value/,
+  );
+});
+
 test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts check output', {
   // The POSIX launcher is a /bin/sh script; Windows ships claudex.ps1, covered separately.
   skip: process.platform === 'win32',
@@ -1241,6 +1341,7 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
   const launcher = path.join(sandbox.root, 'claudex');
   const launchRecord = path.join(sandbox.root, 'launch.json');
   fs.copyFileSync(path.join(ROOT_DIR, 'templates', 'claudex.sh'), launcher);
+  fs.copyFileSync(path.join(ROOT_DIR, 'templates', 'claudex-exec.mjs'), path.join(sandbox.root, 'claudex-exec.mjs'));
   fs.chmodSync(launcher, 0o700);
   createSecret(sandbox.home);
   const spacedNodeDir = path.join(sandbox.root, 'node runtime with spaces');
@@ -1277,6 +1378,7 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     assert.equal(check.status, 0, check.stderr || check.stdout);
     assert.match(check.stdout, /localhost fallback endpoint returned HTTP 2xx/);
     assert.match(check.stdout, /ANTHROPIC_API_KEY will be removed/);
+    assert.match(check.stdout, /delegation tier=standard \(default\)/);
     assert.match(check.stdout, /Fast mode available via --fast/);
     assert.match(check.stdout, /GPT model=sol, reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
     assert.doesNotMatch(`${check.stdout}${check.stderr}`, new RegExp(SECRET_SENTINEL));
@@ -1301,13 +1403,17 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     assert.equal(record.compactWindow, '360000');
     assert.equal(record.toolSearch, 'false');
     assert.equal(record.extraBody, commonEnv.CLAUDE_CODE_EXTRA_BODY);
+    assert.equal(record.delegationTier, undefined);
+    assert.deepEqual(optionValues(record.args, '--append-system-prompt'), []);
     assert.equal(record.inheritedMarker, 'preserved');
 
     const fastLaunch = await runAsync(launcher, ['--fast', '--print', 'hello fast'], { env: commonEnv });
     assert.equal(fastLaunch.status, 0, fastLaunch.stderr || fastLaunch.stdout);
     const fastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
     assert.deepEqual(fastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
-    assert.deepEqual(fastRecord.args.slice(4), ['--print', 'hello fast']);
+    assert.deepEqual(withoutOption(fastRecord.args.slice(4), '--append-system-prompt'), ['--print', 'hello fast']);
+    assertFastPolicy(fastRecord.args);
+    assert.equal(fastRecord.delegationTier, 'fast');
     assert.deepEqual(JSON.parse(fastRecord.extraBody), {
       metadata: { source: 'test' },
       speed: 'fast',
@@ -1315,8 +1421,78 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
 
     const fastCheck = await runAsync(launcher, ['--fast', '--check'], { env: commonEnv });
     assert.equal(fastCheck.status, 0, fastCheck.stderr || fastCheck.stdout);
-    assert.match(fastCheck.stdout, /Fast mode enabled \(request speed=fast\)/);
+    assert.match(fastCheck.stdout, /delegation tier=fast \(explicit\)/);
+    assert.match(fastCheck.stdout, /Fast mode enabled \(request speed=fast, downstream delegation defaults Fast\)/);
     assert.match(fastCheck.stdout, /reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
+
+    const inheritedEnv = {
+      ...commonEnv,
+      CLAUDEX_DELEGATION_TIER: 'fast',
+      CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"parent"},"speed":"fast"}',
+    };
+    const inheritedCheck = await runAsync(launcher, ['--check'], { env: inheritedEnv });
+    assert.equal(inheritedCheck.status, 0, inheritedCheck.stderr || inheritedCheck.stdout);
+    assert.match(inheritedCheck.stdout, /delegation tier=fast \(inherited marker\)/);
+    const inheritedLaunch = await runAsync(launcher, ['--print', 'hello inherited'], { env: inheritedEnv });
+    assert.equal(inheritedLaunch.status, 0, inheritedLaunch.stderr || inheritedLaunch.stdout);
+    const inheritedRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.equal(inheritedRecord.delegationTier, 'fast');
+    assertFastPolicy(inheritedRecord.args);
+
+    const compatibilityEnv = {
+      ...commonEnv,
+      CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"legacy"},"speed":"fast"}',
+    };
+    delete compatibilityEnv.CLAUDEX_DELEGATION_TIER;
+    const compatibilityCheck = await runAsync(launcher, ['--check'], { env: compatibilityEnv });
+    assert.equal(compatibilityCheck.status, 0, compatibilityCheck.stderr || compatibilityCheck.stdout);
+    assert.match(compatibilityCheck.stdout, /delegation tier=fast \(inherited request body\)/);
+
+    const standardLaunch = await runAsync(
+      launcher,
+      ['--standard', '--print', 'hello standard'],
+      { env: inheritedEnv },
+    );
+    assert.equal(standardLaunch.status, 0, standardLaunch.stderr || standardLaunch.stdout);
+    const standardRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.equal(standardRecord.delegationTier, undefined);
+    assert.deepEqual(JSON.parse(standardRecord.extraBody), { metadata: { source: 'parent' } });
+    assert.deepEqual(optionValues(standardRecord.args, '--append-system-prompt'), []);
+
+    const speedOnlyStandard = await runAsync(
+      launcher,
+      ['--standard', '--print', 'speed only'],
+      { env: { ...inheritedEnv, CLAUDE_CODE_EXTRA_BODY: '{"speed":"fast"}' } },
+    );
+    assert.equal(speedOnlyStandard.status, 0, speedOnlyStandard.stderr || speedOnlyStandard.stdout);
+    const speedOnlyRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.equal(speedOnlyRecord.extraBodyPresent, false);
+
+    const fastWins = await runAsync(launcher, ['--standard', '--fast', '--check'], { env: commonEnv });
+    assert.equal(fastWins.status, 0, fastWins.stderr || fastWins.stdout);
+    assert.match(fastWins.stdout, /delegation tier=fast \(explicit\)/);
+    const standardWins = await runAsync(launcher, ['--fast', '--standard', '--check'], { env: inheritedEnv });
+    assert.equal(standardWins.status, 0, standardWins.stderr || standardWins.stdout);
+    assert.match(standardWins.stdout, /delegation tier=standard \(explicit\)/);
+
+    const mergedPromptLaunch = await runAsync(
+      launcher,
+      [
+        '--fast',
+        '--append-system-prompt', 'user policy one',
+        '--append-system-prompt=user policy two',
+        '--model', 'claude-opus-4-6',
+        '--print', 'prompt merge',
+      ],
+      { env: commonEnv },
+    );
+    assert.equal(mergedPromptLaunch.status, 0, mergedPromptLaunch.stderr || mergedPromptLaunch.stdout);
+    const mergedPromptRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assertFastPolicy(mergedPromptRecord.args, ['user policy one', 'user policy two']);
+    assert.deepEqual(
+      withoutOption(mergedPromptRecord.args.slice(4), '--append-system-prompt'),
+      ['--model', 'claude-opus-4-6', '--print', 'prompt merge'],
+    );
 
     const lunaLaunch = await runAsync(
       launcher,
@@ -1338,7 +1514,9 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     assert.equal(terraFastLaunch.status, 0, terraFastLaunch.stderr || terraFastLaunch.stdout);
     const terraFastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
     assert.deepEqual(terraFastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-terra(ultra)[1m]']);
-    assert.deepEqual(terraFastRecord.args.slice(4), ['--print', 'hello terra fast']);
+    assert.deepEqual(withoutOption(terraFastRecord.args.slice(4), '--append-system-prompt'), ['--print', 'hello terra fast']);
+    assertFastPolicy(terraFastRecord.args);
+    assert.equal(terraFastRecord.delegationTier, 'fast');
     assert.equal(terraFastRecord.subagentModel, 'gpt-5.6-terra(ultra)');
     assert.deepEqual(JSON.parse(terraFastRecord.extraBody), {
       metadata: { source: 'test' },
@@ -1388,6 +1566,12 @@ test('POSIX claudex requires HTTP 2xx, falls back, injects env, and redacts chec
     });
     assert.equal(malformedFastCheck.status, 1);
     assert.match(malformedFastCheck.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object/);
+
+    const malformedStandard = await runAsync(launcher, ['--standard', '--check'], {
+      env: { ...inheritedEnv, CLAUDE_CODE_EXTRA_BODY: 'not-json' },
+    });
+    assert.equal(malformedStandard.status, 1);
+    assert.match(malformedStandard.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object when --standard is used/);
     assert.ok(authChecks >= 4);
 
     const failedPreferred = await startServer(401);
@@ -1438,6 +1622,7 @@ test('Windows claudex selects models, merges Fast body, validates launcher flags
     CLIPROXY_URL: endpoint.url,
     CLAUDEX_FALLBACK_URL: endpoint.url,
     CLAUDEX_CLAUDE_BIN: sandbox.claude,
+    CLAUDEX_NODE_BIN: process.execPath,
     FAKE_CLAUDE_STATE: sandbox.state,
     FAKE_CLAUDE_LAUNCH: launchRecord,
     ANTHROPIC_API_KEY: 'inherited-key-that-must-not-reach-claude',
@@ -1464,6 +1649,22 @@ test('Windows claudex selects models, merges Fast body, validates launcher flags
     assert.deepEqual(defaultRecord.args.slice(4), ['--model', 'claude-opus-4-6', '--print', 'hello default']);
     assert.equal(defaultRecord.subagentModel, 'gpt-5.6-sol(xhigh)');
     assert.equal(defaultRecord.extraBody, commonEnv.CLAUDE_CODE_EXTRA_BODY);
+    assert.equal(defaultRecord.delegationTier, undefined);
+    assert.deepEqual(optionValues(defaultRecord.args, '--append-system-prompt'), []);
+
+    const cmdLauncher = path.join(ROOT_DIR, 'templates', 'claudex.cmd');
+    const shortPrintLaunch = await runAsync(
+      process.env.ComSpec || 'cmd.exe',
+      ['/d', '/s', '/c', `call ${cmdLauncher} --fast -p "hello short print"`],
+      { env: commonEnv },
+    );
+    assert.equal(shortPrintLaunch.status, 0, shortPrintLaunch.stderr || shortPrintLaunch.stdout);
+    const shortPrintRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(
+      withoutOption(shortPrintRecord.args.slice(4), '--append-system-prompt'),
+      ['-p', 'hello short print'],
+    );
+    assertFastPolicy(shortPrintRecord.args);
 
     const fastLaunch = await runAsync(
       powershell,
@@ -1473,10 +1674,37 @@ test('Windows claudex selects models, merges Fast body, validates launcher flags
     assert.equal(fastLaunch.status, 0, fastLaunch.stderr || fastLaunch.stdout);
     const fastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
     assert.deepEqual(fastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-sol(xhigh)[1m]']);
-    assert.deepEqual(fastRecord.args.slice(4), ['--print', 'hello fast']);
+    assert.deepEqual(withoutOption(fastRecord.args.slice(4), '--append-system-prompt'), ['--print', 'hello fast']);
+    assertFastPolicy(fastRecord.args);
     assert.equal(fastRecord.apiKeyPresent, false);
+    assert.equal(fastRecord.delegationTier, 'fast');
     assert.deepEqual(JSON.parse(fastRecord.extraBody), {
       metadata: { source: 'test' },
+      speed: 'fast',
+    });
+
+    const literalTokenLaunch = await runAsync(
+      powershell,
+      [...launcherArgs, '--fast', '--print', 'literal %ANTHROPIC_AUTH_TOKEN%'],
+      { env: commonEnv },
+    );
+    assert.equal(literalTokenLaunch.status, 0, literalTokenLaunch.stderr || literalTokenLaunch.stdout);
+    const literalTokenRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(
+      withoutOption(literalTokenRecord.args.slice(4), '--append-system-prompt'),
+      ['--print', 'literal %ANTHROPIC_AUTH_TOKEN%'],
+    );
+    assert.doesNotMatch(JSON.stringify(literalTokenRecord.args), new RegExp(SECRET_SENTINEL));
+
+    const caseSensitiveFast = await runAsync(
+      powershell,
+      [...launcherArgs, '--fast', '--print', 'case-sensitive fast'],
+      { env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: '{"Speed":"slow"}' } },
+    );
+    assert.equal(caseSensitiveFast.status, 0, caseSensitiveFast.stderr || caseSensitiveFast.stdout);
+    const caseSensitiveFastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(JSON.parse(caseSensitiveFastRecord.extraBody), {
+      Speed: 'slow',
       speed: 'fast',
     });
 
@@ -1486,8 +1714,118 @@ test('Windows claudex selects models, merges Fast body, validates launcher flags
       { env: commonEnv },
     );
     assert.equal(check.status, 0, check.stderr || check.stdout);
-    assert.match(check.stdout, /Fast mode enabled \(request speed=fast\)/);
+    assert.match(check.stdout, /delegation tier=fast \(explicit\)/);
+    assert.match(check.stdout, /Fast mode enabled \(request speed=fast, downstream delegation defaults Fast\)/);
     assert.match(check.stdout, /GPT model=sol, reasoning effort=xhigh \(model gpt-5\.6-sol\(xhigh\)\[1m\]\)/);
+
+    const inheritedEnv = {
+      ...commonEnv,
+      CLAUDEX_DELEGATION_TIER: 'fast',
+      CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"parent"},"speed":"fast"}',
+    };
+    const inheritedCheck = await runAsync(powershell, [...launcherArgs, '--check'], { env: inheritedEnv });
+    assert.equal(inheritedCheck.status, 0, inheritedCheck.stderr || inheritedCheck.stdout);
+    assert.match(inheritedCheck.stdout, /delegation tier=fast \(inherited marker\)/);
+    const inheritedLaunch = await runAsync(
+      powershell,
+      [...launcherArgs, '--print', 'hello inherited'],
+      { env: inheritedEnv },
+    );
+    assert.equal(inheritedLaunch.status, 0, inheritedLaunch.stderr || inheritedLaunch.stdout);
+    const inheritedRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.equal(inheritedRecord.delegationTier, 'fast');
+    assertFastPolicy(inheritedRecord.args);
+    assert.deepEqual(JSON.parse(inheritedRecord.extraBody), {
+      metadata: { source: 'parent' },
+      speed: 'fast',
+    });
+
+    const compatibilityEnv = {
+      ...commonEnv,
+      CLAUDE_CODE_EXTRA_BODY: '{"metadata":{"source":"legacy"},"speed":"fast"}',
+    };
+    delete compatibilityEnv.CLAUDEX_DELEGATION_TIER;
+    const compatibilityCheck = await runAsync(powershell, [...launcherArgs, '--check'], { env: compatibilityEnv });
+    assert.equal(compatibilityCheck.status, 0, compatibilityCheck.stderr || compatibilityCheck.stdout);
+    assert.match(compatibilityCheck.stdout, /delegation tier=fast \(inherited request body\)/);
+
+    const uppercaseSpeedCheck = await runAsync(
+      powershell,
+      [...launcherArgs, '--check'],
+      { env: { ...commonEnv, CLAUDE_CODE_EXTRA_BODY: '{"Speed":"fast"}' } },
+    );
+    assert.equal(uppercaseSpeedCheck.status, 0, uppercaseSpeedCheck.stderr || uppercaseSpeedCheck.stdout);
+    assert.match(uppercaseSpeedCheck.stdout, /delegation tier=standard \(default\)/);
+
+    const caseSensitiveStandard = await runAsync(
+      powershell,
+      [...launcherArgs, '--standard', '--print', 'case-sensitive standard'],
+      {
+        env: {
+          ...inheritedEnv,
+          CLAUDE_CODE_EXTRA_BODY: '{"Speed":"slow","speed":"fast"}',
+        },
+      },
+    );
+    assert.equal(caseSensitiveStandard.status, 0, caseSensitiveStandard.stderr || caseSensitiveStandard.stdout);
+    const caseSensitiveStandardRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.deepEqual(JSON.parse(caseSensitiveStandardRecord.extraBody), { Speed: 'slow' });
+
+    const standardLaunch = await runAsync(
+      powershell,
+      [...launcherArgs, '--standard', '--print', 'hello standard'],
+      { env: inheritedEnv },
+    );
+    assert.equal(standardLaunch.status, 0, standardLaunch.stderr || standardLaunch.stdout);
+    const standardRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.equal(standardRecord.delegationTier, undefined);
+    assert.deepEqual(JSON.parse(standardRecord.extraBody), { metadata: { source: 'parent' } });
+    assert.deepEqual(optionValues(standardRecord.args, '--append-system-prompt'), []);
+
+    const speedOnlyStandard = await runAsync(
+      powershell,
+      [...launcherArgs, '--standard', '--print', 'speed only'],
+      { env: { ...inheritedEnv, CLAUDE_CODE_EXTRA_BODY: '{"speed":"fast"}' } },
+    );
+    assert.equal(speedOnlyStandard.status, 0, speedOnlyStandard.stderr || speedOnlyStandard.stdout);
+    const speedOnlyRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assert.equal(speedOnlyRecord.extraBodyPresent, false);
+    assert.equal(speedOnlyRecord.delegationTier, undefined);
+
+    const fastWins = await runAsync(
+      powershell,
+      [...launcherArgs, '--standard', '--fast', '--check'],
+      { env: commonEnv },
+    );
+    assert.equal(fastWins.status, 0, fastWins.stderr || fastWins.stdout);
+    assert.match(fastWins.stdout, /delegation tier=fast \(explicit\)/);
+    const standardWins = await runAsync(
+      powershell,
+      [...launcherArgs, '--fast', '--standard', '--check'],
+      { env: inheritedEnv },
+    );
+    assert.equal(standardWins.status, 0, standardWins.stderr || standardWins.stdout);
+    assert.match(standardWins.stdout, /delegation tier=standard \(explicit\)/);
+
+    const mergedPromptLaunch = await runAsync(
+      powershell,
+      [
+        ...launcherArgs,
+        '--fast',
+        '--append-system-prompt', 'user policy one',
+        '--append-system-prompt=user policy two',
+        '--model', 'claude-opus-4-6',
+        '--print', 'prompt merge',
+      ],
+      { env: commonEnv },
+    );
+    assert.equal(mergedPromptLaunch.status, 0, mergedPromptLaunch.stderr || mergedPromptLaunch.stdout);
+    const mergedPromptRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
+    assertFastPolicy(mergedPromptRecord.args, ['user policy one', 'user policy two']);
+    assert.deepEqual(
+      withoutOption(mergedPromptRecord.args.slice(4), '--append-system-prompt'),
+      ['--model', 'claude-opus-4-6', '--print', 'prompt merge'],
+    );
 
     const lunaLaunch = await runAsync(
       powershell,
@@ -1509,7 +1847,9 @@ test('Windows claudex selects models, merges Fast body, validates launcher flags
     assert.equal(terraFastLaunch.status, 0, terraFastLaunch.stderr || terraFastLaunch.stdout);
     const terraFastRecord = JSON.parse(fs.readFileSync(launchRecord, 'utf8'));
     assert.deepEqual(terraFastRecord.args.slice(0, 4), ['--permission-mode', 'auto', '--model', 'gpt-5.6-terra(ultra)[1m]']);
-    assert.deepEqual(terraFastRecord.args.slice(4), ['--print', 'hello terra fast']);
+    assert.deepEqual(withoutOption(terraFastRecord.args.slice(4), '--append-system-prompt'), ['--print', 'hello terra fast']);
+    assertFastPolicy(terraFastRecord.args);
+    assert.equal(terraFastRecord.delegationTier, 'fast');
     assert.equal(terraFastRecord.subagentModel, 'gpt-5.6-terra(ultra)');
     assert.deepEqual(JSON.parse(terraFastRecord.extraBody), {
       metadata: { source: 'test' },
@@ -1555,6 +1895,14 @@ test('Windows claudex selects models, merges Fast body, validates launcher flags
     );
     assert.equal(malformed.status, 1);
     assert.match(malformed.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object/);
+
+    const malformedStandard = await runAsync(
+      powershell,
+      [...launcherArgs, '--standard', '--check'],
+      { env: { ...inheritedEnv, CLAUDE_CODE_EXTRA_BODY: 'not-json' } },
+    );
+    assert.equal(malformedStandard.status, 1);
+    assert.match(malformedStandard.stderr, /CLAUDE_CODE_EXTRA_BODY must be a JSON object when --standard is used/);
   } finally {
     await endpoint.close();
     cleanupSandbox(sandbox);
@@ -1576,6 +1924,7 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
   assert.match(psText, /\$effort = 'xhigh'/);
   assert.match(psText, /\$argument -eq '--gpt-model'/);
   assert.match(psText, /\$argument -eq '--fast'/);
+  assert.match(psText, /\$argument -eq '--standard'/);
   assert.match(psText, /\$argument -eq '--effort'/);
   assert.match(psText, /'sol' \{ \$modelId = 'gpt-5\.6-sol' \}/);
   assert.match(psText, /'luna'.*gpt-5\.6-luna/s);
@@ -1585,10 +1934,15 @@ test('Windows launchers are native PowerShell/CMD and parse when pwsh is availab
   assert.match(psText, /--gpt-model requires a value/);
   assert.match(psText, /invalid --gpt-model value/);
   assert.match(psText, /CLAUDE_CODE_EXTRA_BODY/);
-  assert.match(psText, /\$body\['speed'\] = 'fast'/);
-  assert.match(psText, /Fast mode enabled \(request speed=fast\)/);
+  assert.match(psText, /CLAUDEX_EXTRA_BODY_ACTION/);
+  assert.match(psText, /CLAUDEX_DELEGATION_TIER/);
+  assert.match(psText, /--has-fast-extra-body/);
+  assert.match(psText, /--validate-extra-body-update/);
+  assert.match(psText, /claudex-exec\.mjs/);
+  assert.match(psText, /downstream delegation defaults Fast/);
   assert.doesNotMatch(psText, /Git Bash|\bbash\b/i);
   assert.match(cmdLauncher, /powershell\.exe/i);
+  assert.match(cmdLauncher, /claudex-exec\.mjs" --powershell-launcher/i);
   assert.match(setupText, /SetEnvironmentVariable\('Path'.*'User'\)/s);
   assert.match(setupText, /--external-change.*Windows User PATH/s);
   assert.match(setupText, /windows-user-path\.json/);
