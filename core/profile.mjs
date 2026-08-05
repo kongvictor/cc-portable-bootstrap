@@ -7,6 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { normalizeCredentialedBase, probeEndpoint } from './statusline/net.mjs';
+// The remoteDev schema lives with the launcher that consumes it: rdev-exec.mjs
+// is installed flat and cannot import this module, so the validator is defined
+// there once and imported here rather than duplicated.
+import { validateRemoteDev } from '../templates/rdev-exec.mjs';
 
 export const PROFILE_SCHEMA_VERSION = 1;
 export const DEFAULT_LOCAL_URL = 'http://127.0.0.1:8317';
@@ -88,13 +92,19 @@ export function validateProfile(value) {
     if (!seen.has(active)) invalid('activeEndpoint is not one of the configured endpoints');
   }
 
-  return {
+  const validated = {
     schemaVersion: PROFILE_SCHEMA_VERSION,
     runsLocalProxy: value.runsLocalProxy,
     servesOthers: value.servesOthers,
     endpoints,
     activeEndpoint: value.activeEndpoint ? normalizeCredentialedBase(value.activeEndpoint) : null,
   };
+
+  // remoteDev is optional: a machine that never opens a remote workspace simply
+  // omits it, and the key stays absent rather than being written back as null.
+  const remoteDev = validateRemoteDev(value.remoteDev, invalid);
+  if (remoteDev) validated.remoteDev = remoteDev;
+  return validated;
 }
 
 export function readProfile(file) {
@@ -195,5 +205,6 @@ export function describeProfile(profile, active) {
     role,
     endpointCount: profile.endpoints.length,
     activeLabel: active?.label ?? null,
+    remoteHostCount: profile.remoteDev?.hosts.length ?? 0,
   };
 }

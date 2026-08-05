@@ -10,7 +10,18 @@
     "                A tunnelled hub is still loopback here, because the tunnel maps it",
     "                to a local port.",
     "tunnel:         optional. Only set it when the endpoint needs an SSH tunnel opened",
-    "                first. host is an ssh config alias."
+    "                first. host is an ssh config alias.",
+    "",
+    "remoteDev:      optional. Omit it entirely on a machine that never opens a remote",
+    "                workspace; rdev then reports that no host is configured.",
+    "transport:      auto (Mux when a build is usable, otherwise SSH) | mux | ssh.",
+    "hosts[].name:   short local name you type, e.g. `rdev --host <name>`.",
+    "hosts[].sshAlias:      an ssh config alias; rdev never learns an address or port.",
+    "hosts[].defaultWorkspace: workspace opened when no name is given. Default \"dev\".",
+    "hosts[].multiplexer:   SSH-fallback session keeper: auto | tmux | zellij | none.",
+    "                       zellij cannot carry a workspace command, so agent shortcuts",
+    "                       such as rclaude need auto, tmux or none.",
+    "hosts[].remotePath:    absolute or ~/ directories prepended to PATH on the remote."
   ],
   "schemaVersion": 1,
   "runsLocalProxy": true,
@@ -32,5 +43,19 @@
       "priority": 100
     }
   ],
-  "activeEndpoint": null
+  "activeEndpoint": null,
+  "remoteDev": {
+    "transport": "auto",
+    "defaultHost": "hub",
+    "hosts": [
+      {
+        "name": "hub",
+        "sshAlias": "my-hub-ssh-alias",
+        "label": "HUB",
+        "defaultWorkspace": "dev",
+        "multiplexer": "auto",
+        "remotePath": ["/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"]
+      }
+    ]
+  }
 }

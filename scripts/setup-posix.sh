@@ -8,7 +8,7 @@ ACTION=${1:-check}
 if [ "$#" -gt 0 ]; then shift; fi
 
 case "$ACTION" in
-  check|setup|restore) ;;
+  check|doctor|setup|restore|uninstall) ;;
   -h|--help)
     exec node "$CORE" --help
     ;;

@@ -10,6 +10,7 @@ One `setup` provisions the whole environment:
 4. **`claudex`** — a launcher that runs Claude Code against GPT-5.6 Sol/Luna/Terra through a local or tunnelled proxy, with a fail-closed health check, model-aware reasoning tiers, matching shortcuts, and inherited Fast defaults for downstream Codex/claudex delegation.
 5. **Statusline** — a Node runtime layered on [claude-hud](https://github.com/jarrodwatts/claude-hud) that rescales GPT/Codex context to its real window, always shows input/cache tokens, appends official Claude/ChatGPT quota, and marks Fast-tier sessions.
 6. **Autostart** — keeps a local proxy running across reboots (launchd / systemd --user / a logon scheduled task on Windows).
+7. **`rdev`** — opens a development workspace on another machine over the Mux desktop app, or over plain SSH with a remote multiplexer when Mux is unavailable. Hosts are SSH aliases read from the machine profile. See [references/remote-dev.md](references/remote-dev.md).
 
 ### What it cannot do for you
 
@@ -62,7 +63,7 @@ scripts/setup-posix.sh uninstall --yes
 ## Secrets and topology stay out of this repository
 
 - Secrets live only in `~/.secrets/cliproxy_apikey` and `~/.secrets/cliproxy_mgmtkey` (mode 600). The installer checks that they exist and are non-empty; it never reads, prints, copies or transmits their values. Only the installed launcher reads the key, at runtime.
-- Machine-specific topology (hostnames, SSH aliases, domains, LAN addresses, ports) lives in `~/.config/cc-portable-bootstrap/profile.json`, which is git-ignored. The repository ships only `templates/profile.example.json` with placeholders.
+- Machine-specific topology (hostnames, SSH aliases, domains, LAN addresses, ports) lives in `~/.config/cc-portable-bootstrap/profile.json`, which is git-ignored. The repository ships only `templates/profile.example.json` with placeholders. This includes `rdev`: it knows an alias name, never an address, port, jump host or key.
 - Endpoint selection is *capability probing, not identity detection*: candidates are tried in priority order and the first to answer HTTP 2xx wins. Nothing in the repository knows what any endpoint is.
 - Keys generated during setup use a CSPRNG, are written locally with mode 600, and are never printed or returned.
 - Release downloads are verified against a published SHA256 before anything is made executable. The upstream Linux installer is a `curl | bash` one-liner; this repository deliberately does not pipe a remote script into a shell.

@@ -84,6 +84,7 @@ Options:
   --yes                Apply without an interactive confirmation
   --no-legacy-migrate  Do not remove a recognized legacy claudex function
   --no-statusline      Do not install or configure the statusline
+  --no-remotedev       Do not install the rdev remote-workspace launchers
   --no-provision       Do not install or check dependencies (codex, cliproxyapi)
   --no-autostart       Do not enable the cliproxyapi background service
   --force              Replace an unrecognized statusLine (review it first)
@@ -110,6 +111,7 @@ function parseArgs(argv) {
     externalChanges: [],
     force: false,
     statusline: true,
+    remotedev: true,
     provision: true,
     autostart: true,
     help: false,
@@ -137,6 +139,7 @@ function parseArgs(argv) {
     else if (arg === '--no-legacy-migrate') options.migrateLegacy = false;
     else if (arg === '--force') options.force = true;
     else if (arg === '--no-statusline') options.statusline = false;
+    else if (arg === '--no-remotedev') options.remotedev = false;
     else if (arg === '--no-provision') options.provision = false;
     else if (arg === '--no-autostart') options.autostart = false;
     else if (arg === '--help' || arg === '-h') options.help = true;
@@ -781,12 +784,60 @@ function claudexShortcuts() {
 }
 
 function claudexShortcutContent(shortcut, platform = process.platform) {
+  return shortcutContent({ ...shortcut, target: 'claudex' }, platform);
+}
+
+// rdev opens a remote development workspace over Mux, or over plain SSH when no
+// Mux build is usable. Named agents get their own shortcut so a reconnect lands
+// in the same long-running workspace.
+function remoteDevShortcuts() {
+  return [{ name: 'rclaude', target: 'rdev', args: ['--agent', 'claude'] }];
+}
+
+function shortcutContent(shortcut, platform = process.platform) {
+  const target = shortcut.target ?? 'claudex';
   return platform === 'win32'
     ? '@echo off\r\n'
-      + `call "%~dp0claudex.cmd" ${shortcut.args.join(' ')} %*\r\n`
+      + `call "%~dp0${target}.cmd" ${shortcut.args.join(' ')} %*\r\n`
       + 'exit /b %ERRORLEVEL%\r\n'
     : '#!/bin/sh\n'
-      + `exec "$(dirname "$0")/claudex" ${shortcut.args.join(' ')} "$@"\n`;
+      + `exec "$(dirname "$0")/${target}" ${shortcut.args.join(' ')} "$@"\n`;
+}
+
+function remoteDevFiles(binDir, options) {
+  const files = [{
+    path: managedTargetPath(path.join(binDir, 'rdev-exec.mjs'), options),
+    content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'rdev-exec.mjs'), 'utf8'),
+    mode: 0o700,
+    label: 'rdev host resolution and launch helper',
+  }];
+
+  if (process.platform === 'win32') {
+    files.push({
+      path: managedTargetPath(path.join(binDir, 'rdev.cmd'), options),
+      content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'rdev.cmd'), 'utf8'),
+      mode: 0o700,
+      label: 'Windows rdev launcher',
+    });
+  } else {
+    files.push({
+      path: managedTargetPath(path.join(binDir, 'rdev'), options),
+      content: fs.readFileSync(path.join(ROOT_DIR, 'templates', 'rdev.sh'), 'utf8'),
+      mode: 0o700,
+      label: 'POSIX rdev launcher',
+    });
+  }
+
+  for (const shortcut of remoteDevShortcuts()) {
+    const basename = process.platform === 'win32' ? `${shortcut.name}.cmd` : shortcut.name;
+    files.push({
+      path: managedTargetPath(path.join(binDir, basename), options),
+      content: shortcutContent(shortcut),
+      mode: 0o700,
+      label: `${shortcut.name} remote agent shortcut`,
+    });
+  }
+  return files;
 }
 
 function legacyClaudexShortcuts() {
@@ -867,6 +918,8 @@ function desiredFiles(options) {
       });
     }
   }
+
+  if (options.remotedev !== false) files.push(...remoteDevFiles(binDir, options));
 
   if (options.profile) {
     const profilePath = managedTargetPath(options.profile, options);

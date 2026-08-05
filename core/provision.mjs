@@ -243,6 +243,15 @@ export function provisioningReport(state) {
   lines.push(mark(state.secrets.apiKey, 'proxy API key file present (value not read)'));
   lines.push(mark(state.secrets.managementKey, 'management key file present (value not read)'));
 
+  // Remote development is optional, so its absence is reported as a fact rather
+  // than as something setup still has to do.
+  if (state.profile) {
+    const hosts = state.profile.remoteDev?.hosts ?? [];
+    lines.push(hosts.length
+      ? `[ok] rdev hosts: ${hosts.map((host) => host.name).join(', ')} (default ${state.profile.remoteDev.defaultHost}, transport ${state.profile.remoteDev.transport})`
+      : '[optional] rdev hosts: none configured; add a remoteDev section to the profile to enable rdev');
+  }
+
   if (state.active.endpoint) lines.push(`[ok] active endpoint: ${state.active.endpoint.label}`);
   else lines.push(`[needs-setup] active endpoint: ${state.active.reason}`);
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.4.0
+
+Adds `rdev`, a cross-platform launcher for opening a development workspace on another machine. Native Windows is a first-class client: the same `setup` that installs claudex now installs `rdev.cmd` and `rclaude.cmd`.
+
+### Added
+
+- `rdev` / `rdev.cmd` plus the shared `rdev-exec.mjs` helper, and an `rclaude` shortcut for `rdev --agent claude`. Installed into `HOME/.claude/bin` by `setup`, removed by `uninstall`, skippable with `setup --no-remotedev`.
+- An optional `remoteDev` section in the machine profile: `transport`, `defaultHost`, and hosts carrying an SSH alias, label, default workspace, remote multiplexer, and remote PATH. Validation rejects shell metacharacters in aliases, a leading `-` in aliases, out-of-charset workspace names, and remote PATH entries that are neither absolute nor `~/`-relative.
+- Two transports. **mux** drives the Mux desktop app (formerly cmux; both product generations are discovered, and a socket-control password file is passed through the environment and never printed). **ssh** uses plain OpenSSH plus a remote multiplexer, so a dropped link does not kill the session.
+- `rdev --check`, which resolves host, workspace and transport without connecting, and `rdev --list`.
+- `references/remote-dev.md`.
+
+### Changed
+
+- `doctor` reports which rdev hosts the profile configures. A profile without a `remoteDev` section is reported as `[optional]`, not as pending setup.
+- `templates/profile.example.json` documents `remoteDev` with placeholders only.
+
+### Security
+
+- No host name, address, port, jump host or key path appears in any tracked file. `rdev` resolves an SSH alias and nothing more; reachability stays a question for the user's own `~/.ssh/config`. A test asserts the rdev sources contain no address or login target.
+- Under `auto`, Mux failing to attach within five seconds falls back to SSH with the reason printed. A transport named explicitly is never silently downgraded.
+- `zellij` cannot carry a workspace command, so combining it with `--agent` or `--command` fails while planning rather than after Mux has already given up.
+
 ## 1.3.0
 
 Propagates a Fast claudex session's default to downstream Codex MCP and nested claudex delegation while preserving explicit Standard overrides.

@@ -1,6 +1,6 @@
 ---
 name: cc-portable-bootstrap
-description: 检查、安装或恢复用户级 Claude Code 可移植 agent 环境：稳定 Codex MCP、Codex 实现模式、claudex 启动器和跨平台 statusline。用户说“bootstrap Claude / 安装 claudex / 配置 Codex MCP / 装状态栏 / 恢复 bootstrap / 检查可移植配置”时触发。
+description: 检查、安装或恢复用户级 Claude Code 可移植 agent 环境：稳定 Codex MCP、Codex 实现模式、claudex 启动器、rdev 远程工作区启动器和跨平台 statusline。用户说“bootstrap Claude / 安装 claudex / 配置 Codex MCP / 装状态栏 / 装 rdev / 配置远程开发 / 恢复 bootstrap / 检查可移植配置”时触发。
 allowed-tools: Bash, Read, Skill, AskUserQuestion
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Skill, AskUserQuestion
 
 为当前用户执行 `check`、`doctor`、`setup`、`restore` 或 `uninstall`。共享逻辑在 Node.js 18+ 核心中；Windows 使用原生 PowerShell，不要求 Git Bash。
 
-一次 setup 覆盖：Codex CLI 与 user-scope Codex MCP、Codex 实现模式 managed block、claudex 启动器、statusline、cliproxyapi（本机需要时）及其后台自启、依赖插件。
+一次 setup 覆盖：Codex CLI 与 user-scope Codex MCP、Codex 实现模式 managed block、claudex 启动器、rdev 远程工作区启动器、statusline、cliproxyapi（本机需要时）及其后台自启、依赖插件。
 
 ## 安全边界
 
@@ -19,6 +19,7 @@ allowed-tools: Bash, Read, Skill, AskUserQuestion
 - 不允许 `danger-full-access`；Codex 实现模式只能使用 `read-only` 或 `workspace-write`，`approval-policy` 固定为 `never`。Bootstrap 新注册的 Codex MCP 必须使用 `codex --sandbox workspace-write --ask-for-approval never mcp-server`。
 - Codex 实现模式有 22 个完整触发词，格式为 `Codex<Model><Effort>[Fast]`，按最长关键词匹配。Sol=`gpt-5.6-sol` 和 Terra=`gpt-5.6-terra` 支持 `high/xhigh/max/ultra`；Luna=`gpt-5.6-luna` 支持 `high/xhigh/max`。完整 Fast 触发词传 `"service_tier":"fast"`；完整非 Fast 触发词必须省略它，即使父 claudex 会话 Fast；仅通用或未指定 tier 的 Codex 委派继承父会话默认。claudex 使用同一 22 组合：非 Fast 触发词/快捷命令必须传 `--standard`，Fast 变体传 `--fast`，通用 bare claudex 继承。session-level 默认只覆盖 Codex MCP 和嵌套 claudex，不新增内置 Agent tier 规则。sandbox、`approval-policy`、`threadId` 和进入/退出规则不变。
 - statusline 由本仓库 `core/statusline/install.mjs` 安装。不要手改 `settings.json` 的 `statusLine`，也不要复制 renderer 或 snapshot 实现。
+- rdev 只认 `profile.json` 中 `remoteDev.hosts[].sshAlias` 这个 SSH 别名。禁止把主机名、域名、IP、端口、跳板机或密钥路径写进仓库任何被跟踪的文件，`templates/profile.example.json` 里只能放占位符。别名解析、外网入口和端口转发属于用户 `~/.ssh/config` 的职责，不属于 bootstrap。`remoteDev` 是可选段，缺失时报 `[optional]`，不是待办项。
 - 不初始化 Git，不 commit，不 push。
 
 ## 选择平台入口
@@ -51,7 +52,7 @@ scripts/setup-posix.sh doctor    # 全链路：依赖、服务、端点、待办
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1 check
 ```
 
-检查结果必须包含：Node/Claude、稳定 Codex binary、user-scope Codex MCP、Codex managed block、claudex launcher、PATH、secret 文件元数据，以及 statusline 委派状态。即使 check 返回 2，也要汇报缺项，而不是把它当成脚本崩溃。
+检查结果必须包含：Node/Claude、稳定 Codex binary、user-scope Codex MCP、Codex managed block、claudex launcher、rdev launcher、PATH、secret 文件元数据，以及 statusline 委派状态。`doctor` 另外报告 `profile.json` 里配置了哪些 rdev 主机。即使 check 返回 2，也要汇报缺项，而不是把它当成脚本崩溃。
 
 ## setup
 
@@ -116,6 +117,18 @@ scripts/setup-posix.sh uninstall --yes
 
 需要回到 setup 之前的精确状态时用 `restore`，不要用 `uninstall`。
 
+## 远程开发（rdev）
+
+setup 安装 `rdev`（Windows 为 `rdev.cmd`）、`rdev-exec.mjs` 和 `rclaude` 快捷方式到 `~/.claude/bin/`。用 `setup --no-remotedev` 跳过；`uninstall` 随其他 managed 文件一起移除。
+
+主机来自 `profile.json` 的可选 `remoteDev` 段，每台机器只写 SSH 别名。传输层 `auto`（默认）优先用 Mux 桌面版（上游已由 cmux 更名为 Mux），找不到可用构建时退回纯 SSH + 远端 multiplexer；Mux 启动后 5 秒内非零退出（说明根本没接上）会打印原因并自动退回 SSH。显式 `--transport mux|ssh` 不会被静默降级。
+
+`multiplexer` 为 `auto|tmux|zellij|none`。auto 优先 tmux，因为只有 tmux 能带工作区命令；`zellij` 与 `--agent`/`--command` 不兼容，规划阶段就报错。
+
+Windows 的 Mux 支持是上游 alpha，需要 Git for Windows，不支持 WSL；`auto` 正是为此设计。详见 `references/remote-dev.md`。
+
+排查用 `rdev --check`（只解析目标和传输层，不连接）和 `rdev --list`。不要为了让 rdev 能连上而去改仓库代码——那是用户 `~/.ssh/config` 的问题。
+
 ## 机器 profile
 
 角色由两个独立布尔量决定，不是单一枚举：
@@ -123,7 +136,7 @@ scripts/setup-posix.sh uninstall --yes
 - `runsLocalProxy`：本机是否运行 cliproxyapi。外网 Windows 机、中心机、需要本地回退的机器都是 true。
 - `servesOthers`：是否被其他机器连接。只有中心机是 true，它决定是否开启远程管理。
 
-端点候选按优先级探测，第一个返回 HTTP 2xx 的胜出。**探测是能力检测，不是身份识别**：仓库里不含任何主机名、SSH 别名、域名或端口。真实拓扑只在 `~/.config/cc-portable-bootstrap/profile.json`（600，不进 git），仓库只提供 `templates/profile.example.json` 占位符。
+端点候选按优先级探测，第一个返回 HTTP 2xx 的胜出。**探测是能力检测，不是身份识别**：仓库里不含任何主机名、SSH 别名、域名或端口。真实拓扑只在 `~/.config/cc-portable-bootstrap/profile.json`（600，不进 git），仓库只提供 `templates/profile.example.json` 占位符。同一个文件里的可选 `remoteDev` 段承载 rdev 主机，遵循同一条规则。
 
 凭据只发给严格 loopback（隧道映射到本机端口后同样是 loopback）；非 loopback 端点必须 HTTPS。
 
@@ -133,4 +146,4 @@ scripts/setup-posix.sh uninstall --yes
 
 ## 最终汇报
 
-简洁列出：动作、backup ID、Codex binary 路径、MCP 是否为 user scope、改动文件、`claudex --check` 结果、statusline 安装位置，以及测试/检查结果。绝不输出 key、Authorization header、MCP 环境值或命令原始 stderr。
+简洁列出：动作、backup ID、Codex binary 路径、MCP 是否为 user scope、改动文件、`claudex --check` 结果、statusline 安装位置、rdev 主机数量（配置了才报），以及测试/检查结果。绝不输出 key、Authorization header、MCP 环境值、Mux socket 密码或命令原始 stderr。
